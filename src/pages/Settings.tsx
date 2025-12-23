@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { User, Key, Bell, Palette, Users, UserCog, Activity, GitBranch, FileUp, Plug, FileText, Monitor, Shield, ChevronDown, Settings as SettingsIcon } from "lucide-react";
+import { User, Key, Bell, Palette, Users, UserCog, Activity, GitBranch, FileUp, Plug, FileText, Monitor, Shield, ChevronDown, Settings as SettingsIcon, History } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import UserManagement from "@/components/UserManagement";
 import SecuritySettings from "@/components/settings/SecuritySettings";
@@ -8,6 +8,7 @@ import AuditLogsSettings from "@/components/settings/AuditLogsSettings";
 import PageAccessSettings from "@/components/settings/PageAccessSettings";
 import BackupRestoreSettings from "@/components/settings/BackupRestoreSettings";
 import EmailTemplatesSettings from "@/components/settings/EmailTemplatesSettings";
+import EmailHistorySettings from "@/components/settings/EmailHistorySettings";
 import ProfileSettings from "@/components/settings/ProfileSettings";
 import NotificationSettings from "@/components/settings/NotificationSettings";
 import DisplaySettings from "@/components/settings/DisplaySettings";
@@ -82,6 +83,10 @@ const menuSections: MenuSection[] = [{
     icon: FileText,
     adminOnly: true
   }, {
+    id: "email-history",
+    label: "Email History",
+    icon: History
+  }, {
     id: "backup",
     label: "Data Import/Export",
     icon: FileUp,
@@ -140,6 +145,8 @@ const Settings = () => {
         return <PipelineSettings />;
       case "email-templates":
         return <EmailTemplatesSettings />;
+      case "email-history":
+        return <EmailHistorySettings />;
       case "backup":
         return <BackupRestoreSettings />;
       case "integrations":
