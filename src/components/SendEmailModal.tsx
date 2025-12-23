@@ -30,6 +30,8 @@ interface SendEmailModalProps {
   onOpenChange: (open: boolean) => void;
   recipient: EmailRecipient | null;
   contactId?: string | null;
+  leadId?: string | null;
+  accountId?: string | null;
   onEmailSent?: () => void;
   // Legacy prop for backwards compatibility
   contact?: {
@@ -40,7 +42,7 @@ interface SendEmailModalProps {
   } | null;
 }
 
-export const SendEmailModal = ({ open, onOpenChange, recipient, contactId, onEmailSent, contact }: SendEmailModalProps) => {
+export const SendEmailModal = ({ open, onOpenChange, recipient, contactId, leadId, accountId, onEmailSent, contact }: SendEmailModalProps) => {
   const { toast } = useToast();
   const { user } = useAuth();
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -208,6 +210,24 @@ export const SendEmailModal = ({ open, onOpenChange, recipient, contactId, onEma
 
       if (data?.error) {
         throw new Error(data.error);
+      }
+
+      // Log email to email_history table
+      try {
+        await supabase.from('email_history').insert({
+          recipient_email: emailRecipient.email,
+          recipient_name: emailRecipient.name,
+          subject: subject.trim(),
+          body: body.trim(),
+          sender_email: senderEmail,
+          sent_by: user?.id,
+          contact_id: contactId || null,
+          lead_id: leadId || null,
+          account_id: accountId || null,
+          status: 'sent',
+        });
+      } catch (historyError) {
+        console.error('Error logging email to history:', historyError);
       }
 
       // Update contact email tracking stats if contactId is provided
