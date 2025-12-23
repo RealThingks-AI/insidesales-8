@@ -14,6 +14,7 @@ import { ContactActivityTimeline } from './ContactActivityTimeline';
 import { ContactActivityLogModal } from './ContactActivityLogModal';
 import { ContactTagsManager } from './ContactTagsManager';
 import { ContactEmailTracking } from './ContactEmailTracking';
+import { SendEmailModal } from '@/components/SendEmailModal';
 import { toast } from '@/hooks/use-toast';
 import {
   User,
@@ -28,6 +29,7 @@ import {
   Tag,
   Activity,
   BarChart3,
+  Send,
 } from 'lucide-react';
 
 interface Contact {
@@ -67,6 +69,7 @@ export const ContactDetailModal = ({
 }: ContactDetailModalProps) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [showActivityLogModal, setShowActivityLogModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
 
   useEffect(() => {
@@ -279,7 +282,15 @@ export const ContactDetailModal = ({
 
             <TabsContent value="engagement" className="mt-4">
               <div className="space-y-4">
-                <h3 className="font-medium">Email Tracking & Engagement</h3>
+                <div className="flex justify-between items-center">
+                  <h3 className="font-medium">Email Tracking & Engagement</h3>
+                  {contact.email && (
+                    <Button size="sm" onClick={() => setShowEmailModal(true)}>
+                      <Send className="h-4 w-4 mr-1" />
+                      Send Email
+                    </Button>
+                  )}
+                </div>
                 <ContactEmailTracking
                   emailOpens={contact.email_opens || 0}
                   emailClicks={contact.email_clicks || 0}
@@ -296,6 +307,19 @@ export const ContactDetailModal = ({
         onOpenChange={setShowActivityLogModal}
         contactId={contact.id}
         onSuccess={handleActivityLogged}
+      />
+
+      <SendEmailModal
+        open={showEmailModal}
+        onOpenChange={setShowEmailModal}
+        recipient={{
+          name: contact.contact_name,
+          email: contact.email || undefined,
+          company_name: contact.company_name || undefined,
+          position: contact.position || undefined,
+        }}
+        contactId={contact.id}
+        onEmailSent={onUpdate}
       />
     </>
   );

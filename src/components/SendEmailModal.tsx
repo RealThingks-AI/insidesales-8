@@ -29,6 +29,8 @@ interface SendEmailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   recipient: EmailRecipient | null;
+  contactId?: string | null;
+  onEmailSent?: () => void;
   // Legacy prop for backwards compatibility
   contact?: {
     contact_name: string;
@@ -38,7 +40,7 @@ interface SendEmailModalProps {
   } | null;
 }
 
-export const SendEmailModal = ({ open, onOpenChange, recipient, contact }: SendEmailModalProps) => {
+export const SendEmailModal = ({ open, onOpenChange, recipient, contactId, onEmailSent, contact }: SendEmailModalProps) => {
   const { toast } = useToast();
   const { user } = useAuth();
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -208,11 +210,40 @@ export const SendEmailModal = ({ open, onOpenChange, recipient, contact }: SendE
         throw new Error(data.error);
       }
 
+      // Update contact email tracking stats if contactId is provided
+      if (contactId) {
+        try {
+          // Get current stats
+          const { data: contactData } = await supabase
+            .from('contacts')
+            .select('email_opens, email_clicks, engagement_score')
+            .eq('id', contactId)
+            .single();
+
+          if (contactData) {
+            const newEmailOpens = (contactData.email_opens || 0) + 1;
+            const newEngagementScore = Math.min((contactData.engagement_score || 0) + 5, 100);
+
+            await supabase
+              .from('contacts')
+              .update({
+                email_opens: newEmailOpens,
+                engagement_score: newEngagementScore,
+                last_contacted_at: new Date().toISOString(),
+              })
+              .eq('id', contactId);
+          }
+        } catch (updateError) {
+          console.error('Error updating contact email stats:', updateError);
+        }
+      }
+
       toast({
         title: "Email Sent",
         description: `Email successfully sent to ${emailRecipient.name}`,
       });
       
+      onEmailSent?.();
       onOpenChange(false);
     } catch (error: any) {
       console.error('Error sending email:', error);
