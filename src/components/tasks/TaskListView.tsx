@@ -83,8 +83,7 @@ export const TaskListView = ({
       task.description?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
     const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
-    const matchesAssignedTo = assignedToFilter === 'all' || 
-      (assignedToFilter === 'unassigned' ? !task.assigned_to : task.assigned_to === assignedToFilter);
+    const matchesAssignedTo = assignedToFilter === 'all' || task.assigned_to === assignedToFilter;
     return matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo;
   });
 
@@ -157,15 +156,14 @@ export const TaskListView = ({
         </Select>
 
         <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
-          <SelectTrigger className="w-[160px]">
+          <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Assigned To" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Assigned</SelectItem>
-            <SelectItem value="unassigned">Unassigned</SelectItem>
             {assignedToIds.map((userId) => (
               <SelectItem key={userId} value={userId}>
-                {displayNames[userId] || 'Loading...'}
+                <span className="truncate">{displayNames[userId] || 'Loading...'}</span>
               </SelectItem>
             ))}
           </SelectContent>
