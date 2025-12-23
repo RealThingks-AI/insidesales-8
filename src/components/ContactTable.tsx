@@ -90,6 +90,8 @@ export const ContactTable = ({
   const [itemsPerPage] = useState(50); // Default 50 contacts per page
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [segmentFilter, setSegmentFilter] = useState("all");
 
   console.log('ContactTable: Rendering with contacts:', contacts.length);
 
@@ -152,11 +154,21 @@ export const ContactTable = ({
   // Filter and sort contacts
   useEffect(() => {
     console.log('ContactTable: Filtering contacts, search term:', searchTerm);
-    let filtered = contacts.filter(contact =>
-      contact.contact_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contact.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contact.email?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    let filtered = contacts.filter(contact => {
+      // Text search
+      const matchesSearch = 
+        contact.contact_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        contact.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        contact.email?.toLowerCase().includes(searchTerm.toLowerCase());
+
+      // Source filter
+      const matchesSource = sourceFilter === "all" || contact.contact_source === sourceFilter;
+
+      // Segment filter
+      const matchesSegment = segmentFilter === "all" || contact.segment === segmentFilter;
+
+      return matchesSearch && matchesSource && matchesSegment;
+    });
 
     // Apply sorting
     if (sortField) {
@@ -180,7 +192,7 @@ export const ContactTable = ({
     setFilteredContacts(filtered);
     setCurrentPage(1);
     console.log('ContactTable: Filtered contacts:', filtered.length);
-  }, [contacts, searchTerm, sortField, sortDirection]);
+  }, [contacts, searchTerm, sortField, sortDirection, sourceFilter, segmentFilter]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -265,6 +277,10 @@ export const ContactTable = ({
         sortField={sortField}
         sortDirection={sortDirection}
         onSort={handleSort}
+        sourceFilter={sourceFilter}
+        onSourceFilterChange={setSourceFilter}
+        segmentFilter={segmentFilter}
+        onSegmentFilterChange={setSegmentFilter}
       />
 
       <Card>
