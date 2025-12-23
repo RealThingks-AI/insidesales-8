@@ -73,6 +73,7 @@ export const TaskListView = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [assignedToFilter, setAssignedToFilter] = useState<string>('all');
 
   const assignedToIds = [...new Set(tasks.map(t => t.assigned_to).filter(Boolean))] as string[];
   const { displayNames } = useUserDisplayNames(assignedToIds);
@@ -82,7 +83,9 @@ export const TaskListView = ({
       task.description?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
     const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
-    return matchesSearch && matchesStatus && matchesPriority;
+    const matchesAssignedTo = assignedToFilter === 'all' || 
+      (assignedToFilter === 'unassigned' ? !task.assigned_to : task.assigned_to === assignedToFilter);
+    return matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo;
   });
 
   const getDueDateColor = (dueDate: string | null) => {
@@ -150,6 +153,21 @@ export const TaskListView = ({
             <SelectItem value="high">High</SelectItem>
             <SelectItem value="medium">Medium</SelectItem>
             <SelectItem value="low">Low</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Assigned To" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Assigned</SelectItem>
+            <SelectItem value="unassigned">Unassigned</SelectItem>
+            {assignedToIds.map((userId) => (
+              <SelectItem key={userId} value={userId}>
+                {displayNames[userId] || 'Loading...'}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
