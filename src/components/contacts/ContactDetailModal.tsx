@@ -14,6 +14,7 @@ import { ContactActivityTimeline } from './ContactActivityTimeline';
 import { ContactActivityLogModal } from './ContactActivityLogModal';
 import { ContactTagsManager } from './ContactTagsManager';
 import { ContactEmailTracking } from './ContactEmailTracking';
+import { EntityEmailHistory } from '@/components/shared/EntityEmailHistory';
 import { SendEmailModal } from '@/components/SendEmailModal';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -30,6 +31,7 @@ import {
   Activity,
   BarChart3,
   Send,
+  History,
 } from 'lucide-react';
 
 interface Contact {
@@ -157,7 +159,7 @@ export const ContactDetailModal = ({
           </DialogHeader>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="overview" className="flex items-center gap-1">
                 <User className="h-4 w-4" />
                 Overview
@@ -165,6 +167,10 @@ export const ContactDetailModal = ({
               <TabsTrigger value="activity" className="flex items-center gap-1">
                 <Activity className="h-4 w-4" />
                 Activity
+              </TabsTrigger>
+              <TabsTrigger value="emails" className="flex items-center gap-1">
+                <History className="h-4 w-4" />
+                Emails
               </TabsTrigger>
               <TabsTrigger value="tags" className="flex items-center gap-1">
                 <Tag className="h-4 w-4" />
@@ -271,6 +277,21 @@ export const ContactDetailModal = ({
                 </Button>
               </div>
               <ContactActivityTimeline contactId={contact.id} />
+            </TabsContent>
+
+            <TabsContent value="emails" className="mt-4">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-medium">Email History</h3>
+                  {contact.email && (
+                    <Button size="sm" onClick={() => setShowEmailModal(true)}>
+                      <Send className="h-4 w-4 mr-1" />
+                      Send Email
+                    </Button>
+                  )}
+                </div>
+                <EntityEmailHistory entityType="contact" entityId={contact.id} />
+              </div>
             </TabsContent>
 
             <TabsContent value="tags" className="mt-4">

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { User, Key, Bell, Palette, Users, UserCog, Activity, GitBranch, FileUp, Plug, FileText, Monitor, Shield, ChevronDown, Settings as SettingsIcon, History } from "lucide-react";
+import { User, Key, Bell, Palette, Users, UserCog, Activity, GitBranch, FileUp, Plug, FileText, Monitor, Shield, ChevronDown, Settings as SettingsIcon, History, BarChart3 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import UserManagement from "@/components/UserManagement";
 import SecuritySettings from "@/components/settings/SecuritySettings";
@@ -9,6 +9,7 @@ import PageAccessSettings from "@/components/settings/PageAccessSettings";
 import BackupRestoreSettings from "@/components/settings/BackupRestoreSettings";
 import EmailTemplatesSettings from "@/components/settings/EmailTemplatesSettings";
 import EmailHistorySettings from "@/components/settings/EmailHistorySettings";
+import { EmailAnalyticsDashboard } from "@/components/settings/EmailAnalyticsDashboard";
 import ProfileSettings from "@/components/settings/ProfileSettings";
 import NotificationSettings from "@/components/settings/NotificationSettings";
 import DisplaySettings from "@/components/settings/DisplaySettings";
@@ -83,9 +84,13 @@ const menuSections: MenuSection[] = [{
     icon: FileText,
     adminOnly: true
   }, {
-    id: "email-history",
+  id: "email-history",
     label: "Email History",
     icon: History
+  }, {
+    id: "email-analytics",
+    label: "Email Analytics",
+    icon: BarChart3
   }, {
     id: "backup",
     label: "Data Import/Export",
@@ -147,6 +152,8 @@ const Settings = () => {
         return <EmailTemplatesSettings />;
       case "email-history":
         return <EmailHistorySettings />;
+      case "email-analytics":
+        return <EmailAnalyticsDashboard />;
       case "backup":
         return <BackupRestoreSettings />;
       case "integrations":
