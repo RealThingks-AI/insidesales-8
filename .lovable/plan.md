@@ -1,84 +1,70 @@
 
 
-## Changes to DealExpandedPanel.tsx - History & Action Items Tables
+## Details Panel Updates - History and Action Items
 
-### 1. History Table Updates
+This plan updates the `DealExpandedPanel.tsx` component with the requested changes to both the History and Action Items sections.
 
-**a. Column reorder: Move "Type" before "Time"**
-- Current: Checkbox | Changes | By | Time | Type | Actions
-- New: No | Changes | By | Type | Time | Actions
+---
 
-**b. Type column: Show text label instead of color dot**
-- Replace the colored dot + Tooltip with a plain text `<span>` showing the action type (e.g., "Note", "Call", "Update")
-- Use `capitalize` on the text, styled as `text-[10px] text-muted-foreground`
+### History Section Changes
 
-**c. "By" column: Make username fully visible**
-- Remove `max-w-[80px] truncate` from the By cell
-- Use `whitespace-nowrap` so names don't wrap
+1. **Remove checkbox, add serial number** -- Replace any row selection with a "#" column showing sequential numbers (1, 2, 3...).
 
-**d. Remove Delete action, replace dropdown with eye icon only**
-- Remove the entire `DropdownMenu` in the actions column
-- Replace with a simple `Button` (ghost, icon-only) with `Eye` icon that calls `setDetailLogId(log.id)`
-- Also remove the bulk delete bar (selectedLogIds bulk actions), checkbox column, and `handleDeleteLog`/`handleBulkDeleteLogs` references since we're recording history and shouldn't allow deletion
+2. **Add color icon with text for Type** -- Instead of plain text in the Type column, show a colored (Note, Call, Meeting, Email) icon alongside the type label 
 
-### 2. Add Type Filter Dropdown to History Section
+3. **Fix eye icon detail dialog** -- The detail dialog currently only shows `field_changes` parsing. For manual log entries (Note, Call, Meeting, Email), it should also display the `message`, `log_type`, and full details from the `details` JSON. Will ensure all relevant fields are shown.
 
-The type filter dropdown already exists in the header (lines 458-472) with options: All, Note, Call, Meeting, Email, System. This matches the uploaded image exactly -- no changes needed here.
+4. **Log action item status updates in history** -- When an action item's status changes via `handleStatusChange`, insert an audit log entry into `security_audit_log` recording the old and new status values.
 
-### 3. Add Sortable Column Headers to History Table
+5. **Changes field full width** -- In the Changes column, remove `max-w-[200px] truncate` so the text uses the full available width, matching the action items task record style.
 
-- Make "Changes", "By", "Type", and "Time" column headers clickable for sorting
-- Add state: `historySortField` (string, default `'created_at'`) and `historySortDirection` (`'asc' | 'desc'`, default `'desc'`)
-- Show sort direction icons (ArrowUpDown / ArrowUp / ArrowDown) similar to ActionItemsTable
-- Sorting logic:
-  - **Changes**: Sort alphabetically by the change summary text
-  - **By**: Sort alphabetically by display name
-  - **Type**: Sort alphabetically by action type
-  - **Time**: Sort by `created_at` timestamp (already exists, just wire to header click)
-- Remove the standalone sort toggle button from the History section header (lines 474-486) since sorting moves to column headers
+6. **Sticky column header on scroll** -- Add `sticky top-0 z-10` to the `TableHeader` so it stays fixed while the records scroll beneath it.
 
-### 4. Add Sortable Column Headers to Action Items Table
+7. **Default sort by date ascending (oldest first)** -- Change the initial `historySortDirection` from `'desc'` to `'asc'` so oldest records appear at the top by default.
 
-- Add state: `actionItemSortField` (string, default `'due_date'`) and `actionItemSortDirection` (`'asc' | 'desc'`, default `'asc'`)
-- Make "Task", "Assigned To", "Due Date", "Status", "Priority" headers clickable
-- Show sort direction icons matching ActionItemsTable module pattern
-- Update `sortedActionItems` to use the new field/direction state
-- Remove the standalone sort toggle button from the Action Items section header (lines 634-645)
+---
+
+### Action Items Section Changes
+
+1. **Remove checkbox, add serial number** -- Replace the checkbox column (and select-all logic) with a "#" column showing sequential numbers.
+
+2. **Rename "Due Date" to "Due"** -- Change the column header text from "Due Date" to "Due".
+
+3. **Log status updates in history** -- Same as History item 4 above; when action item status changes, write an audit log.
+
+4. **Sticky column header on scroll** -- Add `sticky top-0 z-10` to the Action Items `TableHeader`.
+
+5. **Default sort by Status** -- Change `actionItemSortField` initial state from `'due_date'` to `'status'` so items are sorted by status by default.
+
+---
 
 ### Technical Details
 
-**File:** `src/components/DealExpandedPanel.tsx`
+**File modified:** `src/components/DealExpandedPanel.tsx`
 
-**State changes:**
-- Replace `historySortDirection` with `historySortField` + `historySortDirection` (field-based sorting)
-- Replace `actionSortBy` with `actionItemSortField` + `actionItemSortDirection`
-- Remove `selectedLogIds` state (no more history selection/deletion)
-
-**History header (lines 534-546) -- new order:**
-```
-Checkbox removed | Changes (sortable) | By (sortable) | Type (sortable, text) | Time (sortable) | Eye icon column
-```
-
-**Action Items header (lines 684-698) -- add sort icons:**
-```
-Checkbox | Task (sortable) | Assigned To (sortable) | Due Date (sortable) | Status (sortable) | Priority (sortable) | Module | Actions
-```
-
-**Removals:**
-- `handleDeleteLog` function (line 267-271)
-- `handleBulkDeleteLogs` function (line 273-279)
-- `selectedLogIds` state and related toggle functions (lines 163, 298-311)
-- Bulk delete bar in history (lines 515-522)
-- History row checkbox cells
-- History actions dropdown (lines 594-612), replaced with simple eye icon button
-
-**Sort icon helper** (reuse pattern from ActionItemsTable):
-```typescript
-const getHistorySortIcon = (field: string) => {
-  if (historySortField !== field) return <ArrowUpDown className="w-3 h-3 text-muted-foreground/60" />;
-  return historySortDirection === 'asc' 
-    ? <ArrowUp className="w-3 h-3 text-foreground" /> 
-    : <ArrowDown className="w-3 h-3 text-foreground" />;
-};
-```
+**Key changes:**
+- Remove `selectedActionIds`, `toggleAllActions`, `toggleActionItem`, `allActionsSelected`, `someActionsSelected` state and logic (no longer needed without checkboxes)
+- Remove `Checkbox` import
+- Change initial state: `historySortDirection` from `'desc'` to `'asc'`, `actionItemSortField` from `'due_date'` to `'status'`
+- Add serial number column (#) to both tables using the map index
+- Add colored icon(Note, Call, Meeting, Email) next to type text in history rows: `<span className={cn('w-2 h-2 rounded-full inline-block', getTypeDotColor(log.action))} />` before the label
+- Remove `max-w-[200px] truncate` from Changes cell, use `whitespace-normal break-words` for full width
+- Add `className="sticky top-0 z-10"` to both `<TableHeader>` elements
+- Update eye icon detail dialog to show full details for manual entries (message, log_type) and all field changes for system entries
+- In `handleStatusChange`, after the update call, insert an audit log entry:
+  ```ts
+  await supabase.from('security_audit_log').insert({
+    action: 'update',
+    resource_type: 'deals',
+    resource_id: deal.id,
+    user_id: user?.id,
+    details: {
+      message: `Action item status changed: ${oldStatus} -> ${status}`,
+      field_changes: { status: { old: oldStatus, new: status } },
+      action_item_id: id,
+      action_item_title: actionItems.find(i => i.id === id)?.title
+    }
+  });
+  ```
+- Rename "Due Date" header to "Due" in action items table
 
