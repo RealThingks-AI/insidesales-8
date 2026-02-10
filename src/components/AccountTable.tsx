@@ -1,101 +1,58 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCRUDAudit } from "@/hooks/useCRUDAudit";
-import { useUserDisplayNames } from "@/hooks/useUserDisplayNames";
-import { Card } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useColumnPreferences } from "@/hooks/useColumnPreferences";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, X, Eye } from "lucide-react";
-import { RowActionsDropdown, Edit, Trash2, Mail } from "./RowActionsDropdown";
+import { Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { AccountTableBody } from "./account-table/AccountTableBody";
 import { AccountModal } from "./AccountModal";
 import { AccountColumnCustomizer, AccountColumnConfig } from "./AccountColumnCustomizer";
-import { AccountStatusFilter } from "./AccountStatusFilter";
-import { AccountDeleteConfirmDialog } from "./AccountDeleteConfirmDialog";
-import { SendEmailModal, EmailRecipient } from "./SendEmailModal";
-import { AccountDetailModal } from "./accounts/AccountDetailModal";
-import { AccountScoreBadge, AccountSegmentBadge } from "./accounts/AccountScoreBadge";
-export interface Account {
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { fetchPaginatedData } from "@/utils/supabasePagination";
+
+interface Account {
   id: string;
-  company_name: string;
-  region?: string;
-  country?: string;
-  website?: string;
-  company_type?: string;
-  tags?: string[];
-  status?: string;
-  notes?: string;
-  account_owner?: string;
-  industry?: string;
+  account_name: string;
   phone?: string;
-  email?: string;
-  created_at?: string;
-  updated_at?: string;
+  website?: string;
+  industry?: string;
+  company_type?: string;
+  country?: string;
+  region?: string;
+  status?: string;
+  description?: string;
+  account_owner?: string;
   created_by?: string;
   modified_by?: string;
-  score?: number;
-  segment?: string;
+  created_time?: string;
+  modified_time?: string;
+  last_activity_time?: string;
+  currency?: string;
 }
-const defaultColumns: AccountColumnConfig[] = [{
-  field: 'company_name',
-  label: 'Company Name',
-  visible: true,
-  order: 0
-}, {
-  field: 'email',
-  label: 'Email',
-  visible: true,
-  order: 1
-}, {
-  field: 'company_type',
-  label: 'Company Type',
-  visible: true,
-  order: 2
-}, {
-  field: 'industry',
-  label: 'Industry',
-  visible: true,
-  order: 3
-}, {
-  field: 'tags',
-  label: 'Tags',
-  visible: true,
-  order: 4
-}, {
-  field: 'country',
-  label: 'Country',
-  visible: true,
-  order: 5
-}, {
-  field: 'status',
-  label: 'Status',
-  visible: true,
-  order: 6
-}, {
-  field: 'website',
-  label: 'Website',
-  visible: true,
-  order: 7
-}, {
-  field: 'account_owner',
-  label: 'Account Owner',
-  visible: true,
-  order: 8
-}, {
-  field: 'region',
-  label: 'Region',
-  visible: false,
-  order: 9
-}, {
-  field: 'phone',
-  label: 'Phone',
-  visible: false,
-  order: 10
-}];
+
+const defaultColumns: AccountColumnConfig[] = [
+  { field: 'account_name', label: 'Account Name', visible: true, order: 0 },
+  { field: 'linked_contacts', label: 'Linked', visible: true, order: 1 },
+  { field: 'status', label: 'Status', visible: true, order: 2 },
+  { field: 'company_type', label: 'Company Type', visible: true, order: 3 },
+  { field: 'industry', label: 'Industry', visible: true, order: 4 },
+  { field: 'phone', label: 'Phone', visible: true, order: 5 },
+  { field: 'website', label: 'Website', visible: true, order: 6 },
+  { field: 'country', label: 'Country', visible: true, order: 7 },
+  { field: 'region', label: 'Region', visible: true, order: 8 },
+  { field: 'currency', label: 'Currency', visible: true, order: 9 },
+  { field: 'created_time', label: 'Created', visible: false, order: 10 },
+  { field: 'account_owner', label: 'Account Owner', visible: true, order: 11 },
+];
+
 interface AccountTableProps {
   showColumnCustomizer: boolean;
   setShowColumnCustomizer: (show: boolean) => void;
@@ -103,362 +60,285 @@ interface AccountTableProps {
   setShowModal: (show: boolean) => void;
   selectedAccounts: string[];
   setSelectedAccounts: React.Dispatch<React.SetStateAction<string[]>>;
-  onBulkDeleteComplete?: () => void;
+  refreshTrigger?: number;
+  searchTerm?: string;
+  statusFilter?: string;
+  ownerFilter?: string;
 }
-const AccountTable = ({
-  showColumnCustomizer,
-  setShowColumnCustomizer,
-  showModal,
+
+export const AccountTable = ({ 
+  showColumnCustomizer, 
+  setShowColumnCustomizer, 
+  showModal, 
   setShowModal,
   selectedAccounts,
   setSelectedAccounts,
-  onBulkDeleteComplete
+  refreshTrigger,
+  searchTerm = "",
+  statusFilter = "all",
+  ownerFilter = "all",
 }: AccountTableProps) => {
-  const {
-    toast
-  } = useToast();
-  const {
-    logDelete
-  } = useCRUDAudit();
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [filteredAccounts, setFilteredAccounts] = useState<Account[]>([]);
+  const { toast } = useToast();
+  const { logDelete } = useCRUDAudit();
+  const [pageAccounts, setPageAccounts] = useState<Account[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
-  const [columns, setColumns] = useState(defaultColumns);
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [accountToDelete, setAccountToDelete] = useState<string | null>(null);
+  const { columns, setColumns } = useColumnPreferences<AccountColumnConfig>('accounts', defaultColumns);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(50);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
-  const [emailRecipient, setEmailRecipient] = useState<EmailRecipient | null>(null);
-  const [showDetailModal, setShowDetailModal] = useState(false);
-  const [viewingAccount, setViewingAccount] = useState<Account | null>(null);
+  const [contactCounts, setContactCounts] = useState<Record<string, number>>({});
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
+
   useEffect(() => {
-    fetchAccounts();
-  }, []);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [searchTerm]);
+
   useEffect(() => {
-    let filtered = accounts.filter(account => account.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) || account.industry?.toLowerCase().includes(searchTerm.toLowerCase()) || account.country?.toLowerCase().includes(searchTerm.toLowerCase()));
-    if (statusFilter !== "all") {
-      filtered = filtered.filter(account => account.status === statusFilter);
-    }
-    if (tagFilter) {
-      filtered = filtered.filter(account => account.tags?.includes(tagFilter));
-    }
-    if (sortField) {
-      filtered.sort((a, b) => {
-        const aValue = a[sortField as keyof Account] || '';
-        const bValue = b[sortField as keyof Account] || '';
-        const comparison = aValue.toString().localeCompare(bValue.toString());
-        return sortDirection === 'asc' ? comparison : -comparison;
-      });
-    }
-    setFilteredAccounts(filtered);
     setCurrentPage(1);
-  }, [accounts, searchTerm, statusFilter, tagFilter, sortField, sortDirection]);
+  }, [statusFilter, ownerFilter]);
+
+  const fetchAccounts = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      const filters: Record<string, string> = {};
+      if (statusFilter !== 'all') filters.status = statusFilter;
+      if (ownerFilter !== 'all') filters.account_owner = ownerFilter;
+
+      const result = await fetchPaginatedData<Account>('accounts', {
+        page: currentPage,
+        pageSize: itemsPerPage,
+        sortField: sortField || undefined,
+        sortDirection,
+        searchTerm: debouncedSearch || undefined,
+        searchFields: ['account_name', 'phone', 'country', 'industry', 'company_type', 'website'],
+        filters,
+      });
+
+      setPageAccounts(result.data);
+      setTotalCount(result.totalCount);
+    } catch (error) {
+      console.error('AccountTable: Error fetching accounts:', error);
+      toast({ title: "Error", description: "Failed to fetch accounts.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, itemsPerPage, sortField, sortDirection, debouncedSearch, statusFilter, ownerFilter, toast]);
+
+  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
+
+  useEffect(() => {
+    if (refreshTrigger && refreshTrigger > 0) fetchAccounts();
+  }, [refreshTrigger, fetchAccounts]);
+
+  // Fetch linked contact counts for visible accounts
+  useEffect(() => {
+    const fetchContactCounts = async () => {
+      const accountNames = pageAccounts.map(a => a.account_name).filter(Boolean);
+      if (accountNames.length === 0) {
+        setContactCounts({});
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('company_name')
+        .in('company_name', accountNames);
+
+      if (!error && data) {
+        const counts: Record<string, number> = {};
+        data.forEach((row) => {
+          const name = row.company_name;
+          if (name) counts[name] = (counts[name] || 0) + 1;
+        });
+        setContactCounts(counts);
+      }
+    };
+
+    fetchContactCounts();
+  }, [pageAccounts]);
+
   const handleSort = (field: string) => {
     if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
       setSortDirection('asc');
     }
   };
-  const getSortIcon = (field: string) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />;
-    }
-    return sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />;
-  };
-  const fetchAccounts = async () => {
+
+  const handleDelete = async (id: string) => {
     try {
-      setLoading(true);
-      const {
-        data,
-        error
-      } = await supabase.from('accounts').select('*').order('created_at', {
-        ascending: false
-      });
+      const { error } = await supabase.from('accounts').delete().eq('id', id);
       if (error) throw error;
-      setAccounts(data || []);
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch accounts",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-  const handleDelete = async () => {
-    if (!accountToDelete?.id) return;
-    try {
-      // Check for linked contacts/leads
-      const {
-        data: linkedContacts
-      } = await supabase.from('contacts').select('id').eq('account_id', accountToDelete.id).limit(1);
-      const {
-        data: linkedLeads
-      } = await supabase.from('leads').select('id').eq('account_id', accountToDelete.id).limit(1);
-      if (linkedContacts && linkedContacts.length > 0 || linkedLeads && linkedLeads.length > 0) {
-        toast({
-          title: "Cannot Delete",
-          description: "This account has linked contacts or leads. Please unlink them first.",
-          variant: "destructive"
-        });
-        setShowDeleteDialog(false);
-        return;
-      }
-      const {
-        error
-      } = await supabase.from('accounts').delete().eq('id', accountToDelete.id);
-      if (error) throw error;
-      await logDelete('accounts', accountToDelete.id, accountToDelete);
-      toast({
-        title: "Success",
-        description: "Account deleted successfully"
-      });
+      const deletedAccount = pageAccounts.find(a => a.id === id);
+      await logDelete('accounts', id, deletedAccount);
+      toast({ title: "Success", description: "Account deleted successfully" });
       fetchAccounts();
-      setAccountToDelete(null);
-      setShowDeleteDialog(false);
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to delete account",
-        variant: "destructive"
-      });
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast({ title: "Error", description: "Failed to delete account", variant: "destructive" });
     }
   };
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      const pageAccounts = getCurrentPageAccounts().slice(0, 50);
-      setSelectedAccounts(pageAccounts.map(a => a.id));
-    } else {
+
+  const handleBulkDelete = async () => {
+    if (selectedAccounts.length === 0) return;
+    try {
+      const { error } = await supabase.from('accounts').delete().in('id', selectedAccounts);
+      if (error) throw error;
+      toast({ title: "Success", description: `${selectedAccounts.length} account${selectedAccounts.length !== 1 ? 's' : ''} deleted successfully` });
       setSelectedAccounts([]);
+      fetchAccounts();
+    } catch (error) {
+      console.error('Bulk delete error:', error);
+      toast({ title: "Error", description: "Failed to delete accounts", variant: "destructive" });
     }
+    setShowBulkDeleteDialog(false);
   };
-  const handleSelectAccount = (accountId: string, checked: boolean) => {
-    if (checked) {
-      setSelectedAccounts(prev => [...prev, accountId]);
-    } else {
-      setSelectedAccounts(prev => prev.filter(id => id !== accountId));
-    }
+
+  const handleEditAccount = (account: Account) => {
+    setEditingAccount(account);
+    setShowModal(true);
   };
-  const getCurrentPageAccounts = () => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredAccounts.slice(startIndex, startIndex + itemsPerPage);
-  };
-  const totalPages = Math.ceil(filteredAccounts.length / itemsPerPage);
-  const createdByIds = useMemo(() => {
-    return [...new Set(accounts.map(a => a.created_by).filter(Boolean))];
-  }, [accounts]);
-  const {
-    displayNames
-  } = useUserDisplayNames(createdByIds);
+
   const visibleColumns = columns.filter(col => col.visible);
-  const pageAccounts = getCurrentPageAccounts();
-  const getStatusBadgeVariant = (status?: string) => {
-    switch (status) {
-      case 'Hot':
-        return 'destructive';
-      case 'Warm':
-        return 'default';
-      case 'Working':
-        return 'secondary';
-      case 'Closed-Won':
-        return 'outline';
-      case 'Closed-Lost':
-        return 'outline';
-      default:
-        return 'secondary';
-    }
-  };
-  return <div className="space-y-6">
-      {/* Header and Actions */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="relative w-64">
-            <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4 pointer-events-none" />
-            <Input placeholder="Search accounts..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-9" inputSize="control" />
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalCount);
+
+  if (loading && pageAccounts.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading accounts...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {selectedAccounts.length > 0 && (
+        <div className="flex-shrink-0 px-4 py-1.5 border-b bg-background">
+          <Button variant="destructive" size="sm" onClick={() => setShowBulkDeleteDialog(true)}>
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete Selected ({selectedAccounts.length})
+          </Button>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-auto">
+        <AccountTableBody
+          loading={loading}
+          pageAccounts={pageAccounts}
+          visibleColumns={visibleColumns}
+          selectedAccounts={selectedAccounts}
+          setSelectedAccounts={setSelectedAccounts}
+          onEdit={handleEditAccount}
+          onDelete={(id) => { setAccountToDelete(id); setShowDeleteDialog(true); }}
+          searchTerm={searchTerm}
+          onRefresh={fetchAccounts}
+          sortField={sortField}
+          sortDirection={sortDirection}
+          onSort={handleSort}
+          contactCounts={contactCounts}
+        />
+      </div>
+
+      {/* Pagination Footer */}
+      <div className="flex-shrink-0 border-t bg-background px-6 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-muted-foreground">
+              Showing {totalCount === 0 ? 0 : startIndex + 1}-{endIndex} of {totalCount} accounts
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Show:</span>
+              <Select value={String(itemsPerPage)} onValueChange={(v) => { setItemsPerPage(Number(v)); setCurrentPage(1); }}>
+                <SelectTrigger className="w-[70px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="25">25</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <AccountStatusFilter value={statusFilter} onValueChange={setStatusFilter} />
-          {tagFilter && <div className="flex items-center gap-2">
-              <Badge variant="secondary" className="flex items-center gap-1">
-                Tag: {tagFilter}
-                <button onClick={() => setTagFilter(null)} className="ml-1 hover:text-destructive">
-                  <X className="w-3 h-3" />
-                </button>
-              </Badge>
-            </div>}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Previous
+            </Button>
+            <span className="text-sm px-2">
+              Page {currentPage} of {totalPages || 1}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage >= totalPages}
+            >
+              Next
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Table */}
-      <Card>
-        <div className="overflow-auto">
-          <Table>
-            <TableHeader className="sticky top-0 z-10">
-              <TableRow className="bg-muted/50 hover:bg-muted/60 border-b-2">
-                <TableHead className="w-12 text-center font-bold text-foreground bg-muted/50">
-                  <div className="flex justify-center">
-                    <Checkbox checked={selectedAccounts.length > 0 && selectedAccounts.length === Math.min(pageAccounts.length, 50)} onCheckedChange={handleSelectAll} />
-                  </div>
-                </TableHead>
-                {visibleColumns.map(column => <TableHead key={column.field} className="text-left font-bold text-foreground bg-muted/50 px-4 py-3 whitespace-nowrap">
-                    <div className="group flex items-center gap-2 cursor-pointer hover:text-primary" onClick={() => handleSort(column.field)}>
-                      {column.label}
-                      {getSortIcon(column.field)}
-                    </div>
-                  </TableHead>)}
-                <TableHead className="text-center font-bold text-foreground bg-muted/50 w-32 px-4 py-3">
-                  Actions
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? <TableRow>
-                  <TableCell colSpan={visibleColumns.length + 2} className="text-center py-8">
-                    Loading accounts...
-                  </TableCell>
-                </TableRow> : pageAccounts.length === 0 ? <TableRow>
-                  <TableCell colSpan={visibleColumns.length + 2} className="text-center py-8">
-                    No accounts found
-                  </TableCell>
-                </TableRow> : pageAccounts.map(account => <TableRow key={account.id} className="hover:bg-muted/20 border-b">
-                  <TableCell className="text-center px-4 py-3">
-                    <div className="flex justify-center">
-                      <Checkbox checked={selectedAccounts.includes(account.id)} onCheckedChange={checked => handleSelectAccount(account.id, checked as boolean)} />
-                    </div>
-                  </TableCell>
-                  {visibleColumns.map(column => <TableCell key={column.field} className="text-left px-4 py-3 align-middle whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]">
-                      {column.field === 'company_name' ? <button onClick={() => {
-                  setEditingAccount(account);
-                  setShowModal(true);
-                }} className="text-primary hover:underline font-medium text-left truncate block w-full">
-                          {account.company_name || '-'}
-                        </button> : column.field === 'account_owner' ? <span className="truncate block">
-                          {account.created_by ? displayNames[account.created_by] || "Loading..." : '-'}
-                        </span> : column.field === 'status' && account.status ? <Badge variant={getStatusBadgeVariant(account.status)} className="whitespace-nowrap">
-                          {account.status}
-                        </Badge> : column.field === 'tags' && account.tags ? <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className="flex items-center gap-1">
-                                <Badge variant="outline" className="text-xs truncate max-w-[100px] cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors" onClick={() => setTagFilter(account.tags![0])}>
-                                  {account.tags[0]}
-                                </Badge>
-                                {account.tags.length > 1 && <Badge variant="outline" className="text-xs shrink-0">
-                                    +{account.tags.length - 1}
-                                  </Badge>}
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="z-50">
-                              <div className="flex flex-col gap-1">
-                                <span className="font-medium text-xs">All tags:</span>
-                                <div className="flex flex-wrap gap-1 max-w-[280px]">
-                                  {account.tags.map((tag, idx) => <Badge key={idx} variant="secondary" className="text-xs cursor-pointer" onClick={() => setTagFilter(tag)}>
-                                      {tag}
-                                    </Badge>)}
-                                </div>
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider> : column.field === 'website' && account.website ? <a href={account.website.startsWith('http') ? account.website : `https://${account.website}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline flex items-center gap-1">
-                          <span className="truncate max-w-[150px]">
-                            {account.website.replace(/^https?:\/\//, '')}
-                          </span>
-                          
-                        </a> : <span className="truncate block" title={account[column.field as keyof Account]?.toString() || '-'}>
-                          {account[column.field as keyof Account]?.toString() || '-'}
-                        </span>}
-                    </TableCell>)}
-                  <TableCell className="w-20 px-4 py-3">
-                    <div className="flex items-center justify-center">
-                      <RowActionsDropdown
-                        actions={[
-                          {
-                            label: "Edit",
-                            icon: <Edit className="w-4 h-4" />,
-                            onClick: () => {
-                              setEditingAccount(account);
-                              setShowModal(true);
-                            }
-                          },
-                          {
-                            label: "Send Email",
-                            icon: <Mail className="w-4 h-4" />,
-                            onClick: () => {
-                              setEmailRecipient({
-                                name: account.company_name,
-                                email: account.email,
-                                company_name: account.company_name
-                              });
-                              setEmailModalOpen(true);
-                            }
-                          },
-                          {
-                            label: "Delete",
-                            icon: <Trash2 className="w-4 h-4" />,
-                            onClick: () => {
-                              setAccountToDelete(account);
-                              setShowDeleteDialog(true);
-                            },
-                            destructive: true,
-                            separator: true
-                          }
-                        ]}
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>)}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
-
-      {totalPages > 1 && <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredAccounts.length)} of {filteredAccounts.length} accounts
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>
-              <ChevronLeft className="w-4 h-4" />
-              Previous
-            </Button>
-            <span className="text-sm">
-              Page {currentPage} of {totalPages}
-            </span>
-            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>
-              Next
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>}
-
       {/* Modals */}
-      <AccountModal open={showModal} onOpenChange={open => {
-      setShowModal(open);
-      if (!open) setEditingAccount(null);
-    }} account={editingAccount} onSuccess={() => {
-      fetchAccounts();
-      setEditingAccount(null);
-    }} />
-
+      <AccountModal
+        open={showModal}
+        onOpenChange={(open) => { setShowModal(open); if (!open) setEditingAccount(null); }}
+        account={editingAccount}
+        onSuccess={() => { fetchAccounts(); setEditingAccount(null); }}
+      />
       <AccountColumnCustomizer open={showColumnCustomizer} onOpenChange={setShowColumnCustomizer} columns={columns} onColumnsChange={setColumns} />
 
-      <AccountDeleteConfirmDialog open={showDeleteDialog} onConfirm={handleDelete} onCancel={() => {
-      setShowDeleteDialog(false);
-      setAccountToDelete(null);
-    }} isMultiple={false} count={1} />
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>This action cannot be undone. This will permanently delete the account.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (accountToDelete) { handleDelete(accountToDelete); setAccountToDelete(null); } }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      <SendEmailModal open={emailModalOpen} onOpenChange={setEmailModalOpen} recipient={emailRecipient} />
-    </div>;
+      <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedAccounts.length} Account{selectedAccounts.length !== 1 ? 's' : ''}?</AlertDialogTitle>
+            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBulkDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
 };
-export default AccountTable;

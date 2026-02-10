@@ -1,22 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCRUDAudit } from "@/hooks/useCRUDAudit";
-import { Card } from "@/components/ui/card";
-import { ContactTableHeader } from "./contact-table/ContactTableHeader";
+import { useColumnPreferences } from "@/hooks/useColumnPreferences";
 import { ContactTableBody } from "./contact-table/ContactTableBody";
-import { ContactTablePagination } from "./contact-table/ContactTablePagination";
 import { ContactModal } from "./ContactModal";
 import { ContactColumnCustomizer, ContactColumnConfig } from "./ContactColumnCustomizer";
-import { ContactDetailModal } from "./contacts/ContactDetailModal";
+import { StandardPagination } from "./shared/StandardPagination";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { fetchPaginatedData } from "@/utils/supabasePagination";
 
 interface Contact {
   id: string;
   contact_name: string;
   company_name?: string;
-  account_id?: string;
-  account_company_name?: string;
   position?: string;
   email?: string;
   phone_no?: string;
@@ -27,6 +24,7 @@ interface Contact {
   contact_owner?: string;
   created_time?: string;
   modified_time?: string;
+  last_activity_time?: string;
   lead_status?: string;
   industry?: string;
   contact_source?: string;
@@ -37,22 +35,19 @@ interface Contact {
   no_of_employees?: number;
   created_by?: string;
   modified_by?: string;
-  tags?: string[];
-  score?: number;
-  segment?: string;
-  email_opens?: number;
-  email_clicks?: number;
-  engagement_score?: number;
 }
 
 const defaultColumns: ContactColumnConfig[] = [
   { field: 'contact_name', label: 'Contact Name', visible: true, order: 0 },
-  { field: 'account_company_name', label: 'Company Account', visible: true, order: 1 },
+  { field: 'company_name', label: 'Account', visible: true, order: 1 },
   { field: 'position', label: 'Position', visible: true, order: 2 },
   { field: 'email', label: 'Email', visible: true, order: 3 },
-  { field: 'phone_no', label: 'Phone Number', visible: true, order: 4 },
-  { field: 'contact_source', label: 'Contact Source', visible: true, order: 5 },
+  { field: 'phone_no', label: 'Phone', visible: true, order: 4 },
+  { field: 'region', label: 'Region', visible: true, order: 5 },
   { field: 'contact_owner', label: 'Contact Owner', visible: true, order: 6 },
+  { field: 'industry', label: 'Industry', visible: true, order: 7 },
+  { field: 'contact_source', label: 'Source', visible: true, order: 8 },
+  { field: 'last_activity_time', label: 'Last Activity', visible: false, order: 9 },
 ];
 
 interface ContactTableProps {
@@ -63,6 +58,8 @@ interface ContactTableProps {
   selectedContacts: string[];
   setSelectedContacts: React.Dispatch<React.SetStateAction<string[]>>;
   refreshTrigger?: number;
+  searchTerm?: string;
+  setSearchTerm?: (term: string) => void;
 }
 
 export const ContactTable = ({ 
@@ -72,56 +69,51 @@ export const ContactTable = ({
   setShowModal,
   selectedContacts,
   setSelectedContacts,
-  refreshTrigger
+  refreshTrigger,
+  searchTerm = "",
+  setSearchTerm
 }: ContactTableProps) => {
   const { toast } = useToast();
   const { logDelete } = useCRUDAudit();
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
+  const [pageContacts, setPageContacts] = useState<Contact[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
-  const [viewingContact, setViewingContact] = useState<Contact | null>(null);
-  const [showDetailModal, setShowDetailModal] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [contactToDelete, setContactToDelete] = useState<string | null>(null);
-  const [columns, setColumns] = useState(defaultColumns);
+  const { columns, setColumns } = useColumnPreferences<ContactColumnConfig>('contacts', defaultColumns);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(50); // Default 50 contacts per page
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
-  console.log('ContactTable: Rendering with contacts:', contacts.length);
+  // Debounce search
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
 
-  const fetchContacts = async () => {
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [searchTerm]);
+
+  const fetchContacts = useCallback(async () => {
     try {
-      console.log('ContactTable: Starting to fetch contacts...');
       setLoading(true);
-      
-      const { data, error } = await supabase
-        .from('contacts')
-        .select(`
-          *,
-          accounts:account_id (
-            company_name
-          )
-        `)
-        .order('created_time', { ascending: false });
-      
-      // Transform data to include account_company_name
-      const transformedData = (data || []).map(contact => ({
-        ...contact,
-        account_company_name: contact.accounts?.company_name || contact.company_name || null
-      }));
 
-      if (error) {
-        console.error('ContactTable: Supabase error:', error);
-        throw error;
-      }
-      
-      console.log('ContactTable: Successfully fetched contacts:', transformedData?.length || 0);
-      setContacts(transformedData || []);
-      
+      const result = await fetchPaginatedData<Contact>('contacts', {
+        page: currentPage,
+        pageSize: itemsPerPage,
+        sortField: sortField || undefined,
+        sortDirection,
+        searchTerm: debouncedSearch || undefined,
+        searchFields: ['contact_name', 'company_name', 'email'],
+      });
+
+      setPageContacts(result.data);
+      setTotalCount(result.totalCount);
     } catch (error) {
       console.error('ContactTable: Error fetching contacts:', error);
       toast({
@@ -131,63 +123,23 @@ export const ContactTable = ({
       });
     } finally {
       setLoading(false);
-      console.log('ContactTable: Finished fetching contacts');
     }
-  };
+  }, [currentPage, itemsPerPage, sortField, sortDirection, debouncedSearch, toast]);
 
-  // Initial load
   useEffect(() => {
-    console.log('ContactTable: Initial mount, fetching contacts');
     fetchContacts();
-  }, []);
+  }, [fetchContacts]);
 
-  // Handle refresh trigger
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
-      console.log('ContactTable: Refresh triggered:', refreshTrigger);
       fetchContacts();
     }
-  }, [refreshTrigger]);
-
-  // Filter and sort contacts
-  useEffect(() => {
-    console.log('ContactTable: Filtering contacts, search term:', searchTerm);
-    let filtered = contacts.filter(contact =>
-      contact.contact_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contact.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contact.email?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-
-    // Apply sorting
-    if (sortField) {
-      filtered.sort((a, b) => {
-        const aValue = a[sortField as keyof Contact] || '';
-        const bValue = b[sortField as keyof Contact] || '';
-        
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
-          const comparison = aValue.toLowerCase().localeCompare(bValue.toLowerCase());
-          return sortDirection === 'asc' ? comparison : -comparison;
-        }
-        
-        // For non-string values, convert to string for comparison
-        const aStr = String(aValue).toLowerCase();
-        const bStr = String(bValue).toLowerCase();
-        const comparison = aStr.localeCompare(bStr);
-        return sortDirection === 'asc' ? comparison : -comparison;
-      });
-    }
-
-    setFilteredContacts(filtered);
-    setCurrentPage(1);
-    console.log('ContactTable: Filtered contacts:', filtered.length);
-  }, [contacts, searchTerm, sortField, sortDirection]);
+  }, [refreshTrigger, fetchContacts]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
-      // Toggle direction if same field
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
-      // New field, start with ascending
       setSortField(field);
       setSortDirection('asc');
     }
@@ -195,8 +147,7 @@ export const ContactTable = ({
 
   const handleDelete = async (id: string) => {
     try {
-      // Find the contact first to log the deleted data
-      const contactToDelete = contacts.find(c => c.id === id);
+      const contact = pageContacts.find(c => c.id === id);
       
       const { error } = await supabase
         .from('contacts')
@@ -205,8 +156,7 @@ export const ContactTable = ({
 
       if (error) throw error;
 
-      // Log delete operation
-      await logDelete('contacts', id, contactToDelete);
+      await logDelete('contacts', id, contact);
 
       toast({
         title: "Success",
@@ -225,25 +175,14 @@ export const ContactTable = ({
   };
 
   const handleEditContact = (contact: Contact) => {
-    console.log('ContactTable: Editing contact:', contact.id);
     setEditingContact(contact);
     setShowModal(true);
   };
 
-  const handleViewContact = (contact: Contact) => {
-    console.log('ContactTable: Viewing contact:', contact.id);
-    setViewingContact(contact);
-    setShowDetailModal(true);
-  };
-
   const visibleColumns = columns.filter(col => col.visible);
-  const totalPages = Math.ceil(filteredContacts.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const pageContacts = filteredContacts.slice(startIndex, startIndex + itemsPerPage);
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
 
-  console.log('ContactTable: Render state - loading:', loading, 'contacts:', contacts.length, 'pageContacts:', pageContacts.length);
-
-  if (loading) {
+  if (loading && pageContacts.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -254,20 +193,59 @@ export const ContactTable = ({
     );
   }
 
-  return (
-    <div className="space-y-6">
-      <ContactTableHeader 
-        searchTerm={searchTerm}
-        setSearchTerm={setSearchTerm}
-        selectedContacts={selectedContacts}
-        setSelectedContacts={setSelectedContacts}
-        pageContacts={pageContacts}
-        sortField={sortField}
-        sortDirection={sortDirection}
-        onSort={handleSort}
-      />
+  const handleConvertToLead = async (contact: Contact) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to convert contacts",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const leadData = {
+        lead_name: contact.contact_name,
+        company_name: contact.company_name,
+        position: contact.position,
+        email: contact.email,
+        phone_no: contact.phone_no,
+        country: contact.region,
+        industry: contact.industry,
+        contact_source: contact.contact_source,
+        lead_status: 'New',
+        created_by: user.id,
+      };
+      
+      const { error } = await supabase.from('leads').insert([leadData]);
+      if (error) throw error;
+      
+      toast({
+        title: "Success",
+        description: "Contact converted to lead successfully",
+      });
+    } catch (error) {
+      console.error('Convert to lead error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to convert contact to lead",
+        variant: "destructive",
+      });
+    }
+  };
 
-      <Card>
+  const handleAddActionItem = (contact: Contact) => {
+    toast({
+      title: "Coming Soon",
+      description: `Action item creation for ${contact.contact_name} will be available soon.`,
+    });
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Table Content */}
+      <div className="flex-1 min-h-0 overflow-auto">
         <ContactTableBody
           loading={loading}
           pageContacts={pageContacts}
@@ -275,7 +253,6 @@ export const ContactTable = ({
           selectedContacts={selectedContacts}
           setSelectedContacts={setSelectedContacts}
           onEdit={handleEditContact}
-          onView={handleViewContact}
           onDelete={(id) => {
             setContactToDelete(id);
             setShowDeleteDialog(true);
@@ -285,18 +262,21 @@ export const ContactTable = ({
           sortField={sortField}
           sortDirection={sortDirection}
           onSort={handleSort}
+          onConvertToLead={handleConvertToLead}
+          onAddActionItem={handleAddActionItem}
         />
-      </Card>
+      </div>
 
-      {totalPages > 1 && (
-        <ContactTablePagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          itemsPerPage={itemsPerPage}
-          totalItems={filteredContacts.length}
-          onPageChange={setCurrentPage}
-        />
-      )}
+      {/* Always show pagination */}
+      <StandardPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={totalCount}
+        itemsPerPage={itemsPerPage}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={(size) => { setItemsPerPage(size); setCurrentPage(1); }}
+        entityName="contacts"
+      />
 
       {/* Modals */}
       <ContactModal
@@ -307,13 +287,6 @@ export const ContactTable = ({
           fetchContacts();
           setEditingContact(null);
         }}
-      />
-
-      <ContactDetailModal
-        open={showDetailModal}
-        onOpenChange={setShowDetailModal}
-        contact={viewingContact as any}
-        onUpdate={fetchContacts}
       />
 
       <ContactColumnCustomizer

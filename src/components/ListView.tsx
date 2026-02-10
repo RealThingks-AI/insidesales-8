@@ -1,22 +1,22 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Deal, DealStage, DEAL_STAGES, STAGE_COLORS } from "@/types/deal";
-import { Search, Filter, X, ArrowUp, ArrowDown } from "lucide-react";
-import { RowActionsDropdown, Edit, Trash2, CheckSquare } from "./RowActionsDropdown";
+import { Search, X, Pencil, Trash2, ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight, MoreHorizontal, ListTodo } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { format } from "date-fns";
 import { InlineEditCell } from "./InlineEditCell";
 import { DealColumnCustomizer, DealColumnConfig } from "./DealColumnCustomizer";
 import { BulkActionsBar } from "./BulkActionsBar";
 import { DealsAdvancedFilter, AdvancedFilterState } from "./DealsAdvancedFilter";
-import { TaskModal } from "./tasks/TaskModal";
-import { useTasks } from "@/hooks/useTasks";
+import { DealActionItemsModal } from "./DealActionItemsModal";
 import { DealActionsDropdown } from "./DealActionsDropdown";
 import { useToast } from "@/hooks/use-toast";
-
+import { useDealsColumnPreferences } from "@/hooks/useDealsColumnPreferences";
 interface ListViewProps {
   deals: Deal[];
   onDealClick: (deal: Deal) => void;
@@ -47,58 +47,33 @@ export const ListView = ({
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [selectedDeals, setSelectedDeals] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(50);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
   
-  // Task Modal state
-  const [taskModalOpen, setTaskModalOpen] = useState(false);
-  const [taskDealId, setTaskDealId] = useState<string | null>(null);
-  const { createTask } = useTasks();
+  // Action Items Modal state
+  const [actionModalOpen, setActionModalOpen] = useState(false);
+  const [selectedDealForActions, setSelectedDealForActions] = useState<Deal | null>(null);
 
   // Column customizer state
   const [columnCustomizerOpen, setColumnCustomizerOpen] = useState(false);
+  
+  // Delete confirmation state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [dealToDelete, setDealToDelete] = useState<string | null>(null);
 
-  const [columns, setColumns] = useState<DealColumnConfig[]>([
-    { field: 'project_name', label: 'Project', visible: true, order: 0 },
-    { field: 'customer_name', label: 'Customer', visible: true, order: 1 },
-    { field: 'lead_name', label: 'Lead Name', visible: true, order: 2 },
-    { field: 'lead_owner', label: 'Lead Owner', visible: true, order: 3 },
-    { field: 'stage', label: 'Stage', visible: true, order: 4 },
-    { field: 'priority', label: 'Priority', visible: true, order: 5 },
-    { field: 'total_contract_value', label: 'Value', visible: true, order: 6 },
-    { field: 'probability', label: 'Probability', visible: true, order: 7 },
-    { field: 'expected_closing_date', label: 'Expected Close', visible: true, order: 8 },
-    { field: 'region', label: 'Region', visible: false, order: 9 },
-    { field: 'project_duration', label: 'Duration', visible: false, order: 10 },
-    { field: 'start_date', label: 'Start Date', visible: false, order: 11 },
-    { field: 'end_date', label: 'End Date', visible: false, order: 12 },
-    { field: 'proposal_due_date', label: 'Proposal Due', visible: false, order: 13 },
-    { field: 'total_revenue', label: 'Total Revenue', visible: false, order: 14 },
-  ]);
-
-  // Column width state
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
-    'project_name': 200,
-    'customer_name': 150,
-    'lead_name': 150,
-    'lead_owner': 140,
-    'stage': 120,
-    'priority': 100,
-    'total_contract_value': 120,
-    'probability': 120,
-    'expected_closing_date': 140,
-    'region': 120,
-    'project_duration': 120,
-    'start_date': 120,
-    'end_date': 120,
-    'proposal_due_date': 140,
-    'total_revenue': 120,
-  });
+  // Column width and visibility preferences from database
+  const { columnWidths, columns, saveColumnWidths, saveColumns } = useDealsColumnPreferences();
 
   // Resize state
   const [isResizing, setIsResizing] = useState<string | null>(null);
   const [startX, setStartX] = useState(0);
   const [startWidth, setStartWidth] = useState(0);
+  const [tempColumnWidths, setTempColumnWidths] = useState<Record<string, number>>(columnWidths);
   const tableRef = useRef<HTMLTableElement>(null);
+
+  // Sync temp widths with persisted widths when they change
+  useEffect(() => {
+    setTempColumnWidths(columnWidths);
+  }, [columnWidths]);
 
   const { toast } = useToast();
 
@@ -111,7 +86,7 @@ export const ListView = ({
   const formatDate = (date: string | undefined) => {
     if (!date) return '-';
     try {
-      return format(new Date(date), 'dd/MM/yyyy');
+      return format(new Date(date), 'MMM dd, yyyy');
     } catch {
       return '-';
     }
@@ -121,7 +96,7 @@ export const ListView = ({
   const handleMouseDown = (e: React.MouseEvent, field: string) => {
     setIsResizing(field);
     setStartX(e.clientX);
-    setStartWidth(columnWidths[field] || 120);
+    setStartWidth(tempColumnWidths[field] || 120);
     e.preventDefault();
   };
 
@@ -131,7 +106,7 @@ export const ListView = ({
     const deltaX = e.clientX - startX;
     const newWidth = Math.max(80, startWidth + deltaX); // Minimum width of 80px
     
-    setColumnWidths(prev => ({
+    setTempColumnWidths(prev => ({
       ...prev,
       [isResizing]: newWidth
     }));
@@ -139,8 +114,8 @@ export const ListView = ({
 
   const handleMouseUp = () => {
     if (isResizing) {
-      // Save to localStorage
-      localStorage.setItem('deals-column-widths', JSON.stringify(columnWidths));
+      // Save to database
+      saveColumnWidths(tempColumnWidths);
       setIsResizing(null);
     }
   };
@@ -155,20 +130,7 @@ export const ListView = ({
         document.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isResizing, startX, startWidth, columnWidths]);
-
-  // Load column widths from localStorage
-  useEffect(() => {
-    const savedWidths = localStorage.getItem('deals-column-widths');
-    if (savedWidths) {
-      try {
-        const parsed = JSON.parse(savedWidths);
-        setColumnWidths(parsed);
-      } catch (e) {
-        console.error('Failed to parse saved column widths:', e);
-      }
-    }
-  }, []);
+  }, [isResizing, startX, startWidth, tempColumnWidths]);
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -371,82 +333,89 @@ export const ListView = ({
   // Get selected deal objects for export
   const selectedDealObjects = deals.filter(deal => selectedDeals.has(deal.id));
 
-  const handleCreateTask = (deal: Deal) => {
-    setTaskDealId(deal.id);
-    setTaskModalOpen(true);
+  const handleActionClick = (deal: Deal) => {
+    setSelectedDealForActions(deal);
+    setActionModalOpen(true);
+  };
+
+  // Handle page size change
+  const handlePageSizeChange = (size: string) => {
+    setItemsPerPage(Number(size));
+    setCurrentPage(1);
   };
 
   return (
     <div className="h-full flex flex-col bg-background">
-      <div className="flex-shrink-0 px-4 py-2 bg-background border-b border-border">
-        <div className="flex flex-col lg:flex-row gap-2 items-start lg:items-center justify-between">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 flex-1 min-w-0">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4 pointer-events-none" />
-              <Input
-                placeholder="Search deals..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-                inputSize="control"
-              />
-            </div>
-            
-            <DealsAdvancedFilter 
-              filters={filters} 
-              onFiltersChange={setFilters}
-              availableRegions={availableOptions.regions}
-              availableLeadOwners={availableOptions.leadOwners}
-              availablePriorities={availableOptions.priorities}
-              availableProbabilities={availableOptions.probabilities}
-              availableHandoffStatuses={availableOptions.handoffStatuses}
+      {/* Filter Bar - consistent with other modules */}
+      <div className="flex-shrink-0 border-b bg-muted/30 px-6 py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search - responsive width like Action Items */}
+          <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+            <Input
+              placeholder="Search all deal details..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 transition-all hover:border-primary/50 focus:border-primary"
             />
-
-            {hasActiveFilters && (
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={clearAllFilters}
-                className="flex items-center gap-2 text-muted-foreground hover:text-foreground h-8 px-3 text-sm"
-              >
-                <X className="w-4 h-4" />
-                Clear All
-              </Button>
-            )}
-
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <DealActionsDropdown
-                deals={deals}
-                onImport={onImportDeals}
-                onRefresh={() => {}}
-                selectedDeals={selectedDealObjects}
-                onColumnCustomize={() => setColumnCustomizerOpen(true)}
-                showColumns={true}
-              />
-            </div>
           </div>
+          
+          <DealsAdvancedFilter 
+            filters={filters} 
+            onFiltersChange={setFilters}
+            availableRegions={availableOptions.regions}
+            availableLeadOwners={availableOptions.leadOwners}
+            availablePriorities={availableOptions.priorities}
+            availableProbabilities={availableOptions.probabilities}
+            availableHandoffStatuses={availableOptions.handoffStatuses}
+          />
+
+          {hasActiveFilters && (
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={clearAllFilters}
+              className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-4 h-4" />
+              Clear All
+            </Button>
+          )}
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          <DealActionsDropdown
+            deals={deals}
+            onImport={onImportDeals}
+            onRefresh={() => {}}
+            selectedDeals={selectedDealObjects}
+            onColumnCustomize={() => setColumnCustomizerOpen(true)}
+            showColumns={true}
+          />
         </div>
       </div>
 
+      {/* Content Area - single scroll container */}
       <div className="flex-1 min-h-0 overflow-auto">
         <Table ref={tableRef} className="w-full">
-          <TableHeader className="sticky top-0 bg-primary/5 backdrop-blur-sm z-20 border-b-2 border-primary/20">
-            <TableRow className="hover:bg-primary/10 transition-colors border-b border-primary/20">
-              <TableHead className="w-12 min-w-12 bg-primary/10 border-r border-primary/20">
-                <Checkbox
-                  checked={selectedDeals.size === paginatedDeals.length && paginatedDeals.length > 0}
-                  onCheckedChange={handleSelectAll}
-                  className="transition-all hover:scale-110"
-                />
-              </TableHead>
+          <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm z-20 border-b-2">
+            <TableRow className="hover:bg-muted/60 transition-colors border-b">
+              <TableHead className="w-10 min-w-10 py-3 px-3 h-11 bg-muted/80">
+                  <Checkbox
+                    checked={selectedDeals.size === paginatedDeals.length && paginatedDeals.length > 0}
+                    onCheckedChange={handleSelectAll}
+                    className="transition-all hover:scale-110"
+                  />
+                </TableHead>
               {visibleColumns.map(column => (
                 <TableHead 
                   key={column.field} 
-                  className="font-semibold cursor-pointer hover:bg-primary/15 transition-colors relative bg-primary/10 border-r border-primary/20 text-primary-foreground"
+                  className="text-sm font-semibold cursor-pointer hover:bg-muted transition-colors relative bg-muted/80 py-3 px-3 h-11"
                   style={{ 
-                    width: `${columnWidths[column.field] || 120}px`,
-                    minWidth: `${columnWidths[column.field] || 120}px`,
-                    maxWidth: `${columnWidths[column.field] || 120}px`
+                    width: `${tempColumnWidths[column.field] || 120}px`,
+                    minWidth: `${tempColumnWidths[column.field] || 120}px`,
+                    maxWidth: `${tempColumnWidths[column.field] || 120}px`
                   }}
                   onClick={() => {
                     if (sortBy === column.field) {
@@ -457,10 +426,12 @@ export const ListView = ({
                     }
                   }}
                 >
-                  <div className="flex items-center gap-2 pr-4 text-foreground font-bold">
+                  <div className="flex items-center gap-2 pr-4 text-foreground">
                     {column.label}
-                    {sortBy === column.field && (
-                      sortOrder === "asc" ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                    {sortBy !== column.field ? (
+                      <ArrowUpDown className="w-3 h-3 text-muted-foreground/40" />
+                    ) : (
+                      sortOrder === "asc" ? <ArrowUp className="w-3 h-3 text-foreground" /> : <ArrowDown className="w-3 h-3 text-foreground" />
                     )}
                   </div>
                   <div
@@ -472,9 +443,9 @@ export const ListView = ({
                   />
                 </TableHead>
               ))}
-              <TableHead className="w-32 min-w-32 bg-primary/10 border-r border-primary/20 text-foreground font-bold">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
+              <TableHead className="w-20 min-w-20 bg-muted/80 py-3 px-3 h-11"></TableHead>
+              </TableRow>
+            </TableHeader>
           <TableBody>
             {filteredAndSortedDeals.length === 0 ? (
               <TableRow>
@@ -486,29 +457,24 @@ export const ListView = ({
               paginatedDeals.map((deal) => (
                 <TableRow 
                   key={deal.id} 
-                  className={`hover:bg-primary/5 transition-all duration-200 hover:shadow-sm ${
-                    selectedDeals.has(deal.id) ? 'bg-primary/10 shadow-sm' : ''
+                  className={`group hover:bg-muted/50 transition-all ${
+                    selectedDeals.has(deal.id) ? 'bg-primary/5' : ''
                   }`}
-                  style={{ 
-                    background: selectedDeals.has(deal.id) ? 'hsl(var(--primary) / 0.1)' : undefined,
-                    borderLeft: selectedDeals.has(deal.id) ? '3px solid hsl(var(--primary))' : undefined 
-                  }}
                 >
-                  <TableCell onClick={(e) => e.stopPropagation()}>
+                  <TableCell className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
                     <Checkbox
                       checked={selectedDeals.has(deal.id)}
                       onCheckedChange={(checked) => handleSelectDeal(deal.id, Boolean(checked))}
-                      className="transition-all hover:scale-110"
                     />
                   </TableCell>
                   {visibleColumns.map(column => (
                     <TableCell 
                       key={column.field} 
-                      className="font-medium"
+                      className="text-sm py-2 px-3"
                       style={{ 
-                        width: `${columnWidths[column.field] || 120}px`,
-                        minWidth: `${columnWidths[column.field] || 120}px`,
-                        maxWidth: `${columnWidths[column.field] || 120}px`
+                        width: `${tempColumnWidths[column.field] || 120}px`,
+                        minWidth: `${tempColumnWidths[column.field] || 120}px`,
+                        maxWidth: `${tempColumnWidths[column.field] || 120}px`
                       }}
                     >
                       <InlineEditCell
@@ -521,35 +487,36 @@ export const ListView = ({
                       />
                     </TableCell>
                   ))}
-                  <TableCell>
-                    <div className="flex items-center justify-center">
-                      <RowActionsDropdown
-                        actions={[
-                          {
-                            label: "Create Task",
-                            icon: <CheckSquare className="w-4 h-4" />,
-                            onClick: () => handleCreateTask(deal)
-                          },
-                          {
-                            label: "Edit",
-                            icon: <Edit className="w-4 h-4" />,
-                            onClick: () => onDealClick(deal)
-                          },
-                          {
-                            label: "Delete",
-                            icon: <Trash2 className="w-4 h-4" />,
-                            onClick: () => {
-                              onDeleteDeals([deal.id]);
-                              toast({
-                                title: "Deal deleted",
-                                description: `Successfully deleted ${deal.project_name || 'deal'}`,
-                              });
-                            },
-                            destructive: true,
-                            separator: true
-                          }
-                        ]}
-                      />
+                  <TableCell className="py-2 px-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex justify-center">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => onDealClick(deal)}>
+                            <Pencil className="h-4 w-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleActionClick(deal)}>
+                            <ListTodo className="h-4 w-4 mr-2" />
+                            Action Items
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            onClick={() => {
+                              setDealToDelete(deal.id);
+                              setDeleteDialogOpen(true);
+                            }}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -559,41 +526,40 @@ export const ListView = ({
         </Table>
       </div>
 
-      <div className="flex-shrink-0 bg-background border-t">
-        {selectedDeals.size > 0 && (
+      {/* Bulk Actions Bar */}
+      {selectedDeals.size > 0 && (
+        <div className="flex-shrink-0 border-t bg-primary/5">
           <BulkActionsBar
             selectedCount={selectedDeals.size}
             onDelete={handleBulkDelete}
             onExport={handleBulkExport}
             onClearSelection={() => setSelectedDeals(new Set())}
           />
-        )}
+        </div>
+      )}
 
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4">
-          <div className="flex flex-col sm:flex-row items-center gap-4 text-sm text-muted-foreground">
-            <span>Total: <strong>{filteredAndSortedDeals.length}</strong> deals</span>
-            {hasActiveFilters && (
+      {/* Standard Pagination Footer - matching Action Items */}
+      {filteredAndSortedDeals.length > 0 && (
+        <div className="flex-shrink-0 border-t bg-background px-6 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-muted-foreground">
+                Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredAndSortedDeals.length)} of {filteredAndSortedDeals.length} deals
+              </span>
               <div className="flex items-center gap-2">
-                <span>Active filters:</span>
-                {filters.stages.length > 0 && <Badge variant="secondary">Stages: {filters.stages.join(', ')}</Badge>}
-                {filters.regions.length > 0 && <Badge variant="secondary">Regions: {filters.regions.join(', ')}</Badge>}
-                {filters.leadOwners.length > 0 && <Badge variant="secondary">Owners: {filters.leadOwners.join(', ')}</Badge>}
-                {filters.priorities.length > 0 && <Badge variant="secondary">Priorities: {filters.priorities.join(', ')}</Badge>}
-                {filters.probabilities.length > 0 && <Badge variant="secondary">Probabilities: {filters.probabilities.join(', ')}%</Badge>}
-                {searchTerm && <Badge variant="secondary">Search: {searchTerm}</Badge>}
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={clearAllFilters}
-                  className="h-6 px-2 text-xs"
-                >
-                  Clear All
-                </Button>
+                <span className="text-sm text-muted-foreground">Show:</span>
+                <Select value={itemsPerPage.toString()} onValueChange={handlePageSizeChange}>
+                  <SelectTrigger className="w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            )}
-          </div>
-
-          {totalPages > 1 && (
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -601,36 +567,68 @@ export const ListView = ({
                 onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                 disabled={currentPage === 1}
               >
+                <ChevronLeft className="h-4 w-4 mr-1" />
                 Previous
               </Button>
-              <span className="text-sm text-muted-foreground px-3">
-                Page {currentPage} of {totalPages}
+              <span className="text-sm px-2">
+                Page {currentPage} of {totalPages || 1}
               </span>
               <Button
                 variant="outline"
-                size="sm"  
+                size="sm"
                 onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                disabled={currentPage === totalPages}
+                disabled={currentPage >= totalPages}
               >
                 Next
+                <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
-      <TaskModal
-        open={taskModalOpen}
-        onOpenChange={setTaskModalOpen}
-        onSubmit={createTask}
-        context={taskDealId ? { module: 'deals', recordId: taskDealId, locked: true } : undefined}
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Deal</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this deal? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => {
+                if (dealToDelete) {
+                  onDeleteDeals([dealToDelete]);
+                  toast({
+                    title: "Deal deleted",
+                    description: "Deal has been successfully deleted",
+                  });
+                }
+                setDealToDelete(null);
+                setDeleteDialogOpen(false);
+              }} 
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <DealActionItemsModal
+        open={actionModalOpen}
+        onOpenChange={setActionModalOpen}
+        deal={selectedDealForActions}
       />
 
       <DealColumnCustomizer
         open={columnCustomizerOpen}
         onOpenChange={setColumnCustomizerOpen}
         columns={columns}
-        onColumnsChange={setColumns}
+        onColumnsChange={saveColumns}
       />
     </div>
   );

@@ -1,80 +1,54 @@
 import { ContactTable } from "@/components/ContactTable";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Settings, MoreVertical, Upload, Plus, Trash2, Download } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Settings, MoreVertical, Upload, Plus, Trash2, Download, Search } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useRef } from "react";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useSimpleContactsImportExport } from "@/hooks/useSimpleContactsImportExport";
 import { useCRUDAudit } from "@/hooks/useCRUDAudit";
+
 const Contacts = () => {
-  const {
-    toast
-  } = useToast();
-  const {
-    logBulkDelete
-  } = useCRUDAudit();
+  const { toast } = useToast();
+  const { logBulkDelete } = useCRUDAudit();
   const [showColumnCustomizer, setShowColumnCustomizer] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [searchTerm, setSearchTerm] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  console.log('Contacts page: Rendering with refreshTrigger:', refreshTrigger);
+
   const onRefresh = () => {
-    console.log('Contacts page: Triggering refresh...');
-    setRefreshTrigger(prev => {
-      const newTrigger = prev + 1;
-      console.log('Contacts page: Refresh trigger updated from', prev, 'to', newTrigger);
-      return newTrigger;
-    });
+    setRefreshTrigger(prev => prev + 1);
   };
-  const {
-    handleImport,
-    handleExport,
-    isImporting
-  } = useSimpleContactsImportExport(onRefresh);
+
+  const { handleImport, handleExport, isImporting } = useSimpleContactsImportExport(onRefresh);
+
   const handleImportClick = () => {
-    console.log('Contacts page: Import clicked, opening file dialog');
     fileInputRef.current?.click();
   };
+
   const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    console.log('Contacts page: File selected for import:', file?.name);
-    if (!file) {
-      console.log('Contacts page: No file selected, returning');
-      return;
-    }
-    console.log('Contacts page: Starting CSV import process with file:', {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      lastModified: new Date(file.lastModified).toISOString()
-    });
-    try {
-      console.log('Contacts page: Calling handleImport from hook');
-      await handleImport(file);
+    if (!file) return;
 
-      // Reset the file input to allow reimporting the same file
+    try {
+      await handleImport(file);
       event.target.value = '';
-      console.log('Contacts page: File input reset');
     } catch (error: any) {
       console.error('Contacts page: Import error caught:', error);
-
-      // Reset file input on error too
       event.target.value = '';
     }
   };
+
   const handleBulkDelete = async () => {
     if (selectedContacts.length === 0) return;
     try {
-      const {
-        error
-      } = await supabase.from('contacts').delete().in('id', selectedContacts);
+      const { error } = await supabase.from('contacts').delete().in('id', selectedContacts);
       if (error) throw error;
 
-      // Log bulk delete operation
       await logBulkDelete('contacts', selectedContacts.length, selectedContacts);
       toast({
         title: "Success",
@@ -90,23 +64,45 @@ const Contacts = () => {
       });
     }
   };
-  return <div className="h-screen flex flex-col bg-background overflow-hidden">
-      {/* Fixed Header */}
-      <div className="flex-shrink-0 bg-background">
-        <div className="px-6 h-16 flex items-center border-b w-full">
-          <div className="flex items-center justify-between w-full">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-2xl text-foreground font-semibold">Contacts</h1>
-            </div>
-            <div className="flex items-center gap-3">
-          
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header - fixed height matching sidebar */}
+      <div className="flex-shrink-0 h-16 border-b bg-background px-6 flex items-center">
+        <div className="flex items-center justify-between w-full">
+          <h1 className="text-2xl font-semibold text-foreground">Contacts</h1>
+          <Button onClick={() => setShowModal(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add Contact
+          </Button>
+        </div>
+      </div>
+
+      {/* Filter Bar - consistent padding and styling */}
+      <div className="flex-shrink-0 border-b bg-muted/30 px-6 py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search input */}
+          <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input 
+              placeholder="Search contacts..." 
+              value={searchTerm} 
+              onChange={(e) => setSearchTerm(e.target.value)} 
+              className="pl-9" 
+            />
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Actions dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" disabled={isImporting}>
-                Actions
+              <Button variant="outline" size="icon" disabled={isImporting}>
+                <MoreVertical className="w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent>
+            <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setShowColumnCustomizer(true)}>
                 <Settings className="w-4 h-4 mr-2" />
                 Columns
@@ -119,28 +115,43 @@ const Contacts = () => {
                 <Download className="w-4 h-4 mr-2" />
                 Export CSV
               </DropdownMenuItem>
-              {selectedContacts.length > 0 && <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive focus:text-destructive">
+              {selectedContacts.length > 0 && (
+                <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive focus:text-destructive">
                   <Trash2 className="w-4 h-4 mr-2" />
                   Delete Selected ({selectedContacts.length})
-                </DropdownMenuItem>}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
-
-          <Button variant="outline" size="sm" onClick={() => setShowModal(true)}>
-            Add Contact
-          </Button>
-            </div>
-          </div>
         </div>
       </div>
 
       {/* Hidden file input for CSV import */}
-      <Input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportCSV} className="hidden" disabled={isImporting} />
+      <input 
+        ref={fileInputRef} 
+        type="file" 
+        accept=".csv" 
+        onChange={handleImportCSV} 
+        className="hidden" 
+        disabled={isImporting} 
+      />
 
-      {/* Main Content Area */}
-      <div className="flex-1 min-h-0 overflow-auto p-6">
-        <ContactTable showColumnCustomizer={showColumnCustomizer} setShowColumnCustomizer={setShowColumnCustomizer} showModal={showModal} setShowModal={setShowModal} selectedContacts={selectedContacts} setSelectedContacts={setSelectedContacts} refreshTrigger={refreshTrigger} />
+      {/* Content Area */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <ContactTable 
+          showColumnCustomizer={showColumnCustomizer} 
+          setShowColumnCustomizer={setShowColumnCustomizer} 
+          showModal={showModal} 
+          setShowModal={setShowModal} 
+          selectedContacts={selectedContacts} 
+          setSelectedContacts={setSelectedContacts} 
+          refreshTrigger={refreshTrigger}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+        />
       </div>
-    </div>;
+    </div>
+  );
 };
+
 export default Contacts;

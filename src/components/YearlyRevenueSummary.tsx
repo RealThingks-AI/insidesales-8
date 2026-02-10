@@ -11,12 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
-interface YearlyRevenueSummaryProps {
-  selectedYear?: number;
-}
-const YearlyRevenueSummary = ({
-  selectedYear: propSelectedYear
-}: YearlyRevenueSummaryProps) => {
+const YearlyRevenueSummary = () => {
   const {
     user
   } = useAuth();
@@ -33,8 +28,7 @@ const YearlyRevenueSummary = ({
   const availableYears = [2023, 2024, 2025, 2026];
   const currentYear = new Date().getFullYear();
   const defaultYear = availableYears.includes(currentYear) ? currentYear : 2025;
-  const [internalSelectedYear, setSelectedYear] = useState(defaultYear);
-  const selectedYear = propSelectedYear ?? internalSelectedYear;
+  const [selectedYear, setSelectedYear] = useState(defaultYear);
   const {
     revenueData,
     isLoading: dataLoading
@@ -109,6 +103,27 @@ const YearlyRevenueSummary = ({
   // Show empty state when no deals exist for the selected year
   if (revenueData && !revenueData.hasDeals) {
     return <div className="space-y-6">
+        {/* Header with Year Selector and Notification Bell */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Revenue Analytics</h2>
+            <p className="text-muted-foreground"> </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <NotificationBell placement="down" size="small" />
+            <Select value={selectedYear.toString()} onValueChange={value => setSelectedYear(parseInt(value))}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableYears.map(year => <SelectItem key={year} value={year.toString()}>
+                    {year}
+                  </SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
         {/* Empty State */}
         <Card className="py-12">
           <CardContent className="text-center">
@@ -128,6 +143,27 @@ const YearlyRevenueSummary = ({
   const totalCombined = (revenueData?.totalActual || 0) + (revenueData?.totalProjected || 0);
   const progressPercentage = getProgressPercentage(revenueData?.totalActual || 0, revenueData?.target || 0);
   return <div className="space-y-6">
+      {/* Header with Year Selector and Notification Bell */}
+      <div className="flex items-center justify-between">
+        <div>
+          
+          <p className="text-muted-foreground"> </p>
+        </div>
+        <div className="flex items-center gap-4">
+          <NotificationBell placement="down" size="small" />
+          <Select value={selectedYear.toString()} onValueChange={value => setSelectedYear(parseInt(value))}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {availableYears.map(year => <SelectItem key={year} value={year.toString()}>
+                  {year}
+                </SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="hover-scale">
@@ -202,7 +238,7 @@ const YearlyRevenueSummary = ({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            
+            <TrendingUp className="w-5 h-5" />
             Quarterly Breakdown - {selectedYear}
           </CardTitle>
         </CardHeader>
