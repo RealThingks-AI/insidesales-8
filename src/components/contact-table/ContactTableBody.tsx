@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MoreHorizontal, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, UserPlus, ListTodo } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ListTodo } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { useUserDisplayNames } from "@/hooks/useUserDisplayNames";
 import { ContactColumnConfig } from "../ContactColumnCustomizer";
@@ -45,7 +45,6 @@ interface ContactTableBodyProps {
   sortField: string | null;
   sortDirection: 'asc' | 'desc';
   onSort: (field: string) => void;
-  onConvertToLead?: (contact: Contact) => void;
   onAddActionItem?: (contact: Contact) => void;
 }
 
@@ -71,7 +70,6 @@ export const ContactTableBody = ({
   sortField,
   sortDirection,
   onSort,
-  onConvertToLead,
   onAddActionItem
 }: ContactTableBodyProps) => {
   const [viewAccountName, setViewAccountName] = useState<string | null>(null);
@@ -242,11 +240,11 @@ export const ContactTableBody = ({
 
   return (
     <>
-      <div className={cn("overflow-auto", isResizing && "select-none")}>
+      <div className={cn(isResizing && "select-none")}>
         <Table>
-          <TableHeader className="sticky top-0 z-10">
-            <TableRow className="bg-muted/50 hover:bg-muted/60 border-b-2">
-              <TableHead className="w-12 text-center font-bold text-foreground bg-muted/50 py-3">
+          <TableHeader className="sticky top-0 z-20 bg-muted/80 backdrop-blur-sm">
+            <TableRow className="bg-muted/80 hover:bg-muted/80 border-b-2">
+              <TableHead className="w-12 text-center font-bold text-foreground bg-muted/80 py-3">
                 <div className="flex justify-center">
                   <Checkbox
                     checked={selectedContacts.length > 0 && selectedContacts.length === Math.min(pageContacts.length, 50)}
@@ -258,7 +256,7 @@ export const ContactTableBody = ({
                 <TableHead 
                   key={column.field} 
                   className={cn(
-                    "relative text-left font-bold text-foreground bg-muted/50 px-4 py-3",
+                    "relative text-left font-bold text-foreground bg-muted/80 px-4 py-3",
                     sortField === column.field && "bg-accent"
                   )}
                   style={{ width: `${columnWidths[column.field] || 120}px`, minWidth: column.field === 'contact_name' ? '150px' : '60px' }}
@@ -280,7 +278,7 @@ export const ContactTableBody = ({
                   />
                 </TableHead>
               ))}
-              <TableHead className="w-20 bg-muted/50 py-3"></TableHead>
+              <TableHead className="w-20 bg-muted/80 py-3"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -318,12 +316,6 @@ export const ContactTableBody = ({
                           <Pencil className="h-4 w-4 mr-2" />
                           Edit
                         </DropdownMenuItem>
-                        {onConvertToLead && (
-                          <DropdownMenuItem onClick={() => onConvertToLead(contact)}>
-                            <UserPlus className="h-4 w-4 mr-2" />
-                            Convert to Lead
-                          </DropdownMenuItem>
-                        )}
                         {onAddActionItem && (
                           <DropdownMenuItem onClick={() => onAddActionItem(contact)}>
                             <ListTodo className="h-4 w-4 mr-2" />

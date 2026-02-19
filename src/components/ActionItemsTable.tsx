@@ -14,7 +14,6 @@ import { useAllUsers } from '@/hooks/useUserDisplayNames';
 import { useModuleRecordNames } from '@/hooks/useModuleRecords';
 import { ActionItem, ActionItemStatus, ActionItemPriority } from '@/hooks/useActionItems';
 import { DealForm } from './DealForm';
-import { LeadModal } from './LeadModal';
 import { ContactModal } from './ContactModal';
 import { supabase } from '@/integrations/supabase/client';
 import { Deal } from '@/types/deal';
@@ -99,10 +98,8 @@ export function ActionItemsTable({
 
   // Modal state for viewing linked records
   const [dealModalOpen, setDealModalOpen] = useState(false);
-  const [leadModalOpen, setLeadModalOpen] = useState(false);
   const [contactModalOpen, setContactModalOpen] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
-  const [selectedLead, setSelectedLead] = useState<any>(null);
   const [selectedContact, setSelectedContact] = useState<any>(null);
   const allSelected = actionItems.length > 0 && selectedIds.length === actionItems.length;
   const someSelected = selectedIds.length > 0 && selectedIds.length < actionItems.length;
@@ -186,16 +183,6 @@ export function ActionItemsTable({
         if (data) {
           setSelectedDeal(data as Deal);
           setDealModalOpen(true);
-        }
-      } else if (normalizedType === 'lead' || normalizedType === 'leads') {
-        const { data } = await supabase
-          .from('leads')
-          .select('*')
-          .eq('id', moduleId)
-          .maybeSingle();
-        if (data) {
-          setSelectedLead(data);
-          setLeadModalOpen(true);
         }
       } else if (normalizedType === 'contact' || normalizedType === 'contacts') {
         const { data } = await supabase
@@ -291,9 +278,9 @@ export function ActionItemsTable({
   }];
   return <div className={cn(isResizing && 'select-none')}>
       <Table>
-        <TableHeader className="sticky top-0 z-10">
-          <TableRow className="bg-muted/50 border-b-2 border-border">
-            {columns.map(col => <TableHead key={col.field} className={cn('relative text-sm font-bold bg-muted/50 py-3 h-11 text-foreground', col.compact ? 'px-1 text-center' : 'px-3 text-left', col.sortable && 'cursor-pointer hover:bg-muted/80', sortField === col.field && 'bg-accent', col.field === 'checkbox' && 'w-10', col.field === 'actions' && 'w-[60px] px-2')} style={{
+        <TableHeader className="sticky top-0 z-20 bg-muted/80 backdrop-blur-sm">
+          <TableRow className="bg-muted/80 border-b-2 border-border">
+            {columns.map(col => <TableHead key={col.field} className={cn('relative text-sm font-bold bg-muted/80 py-3 h-11 text-foreground', col.compact ? 'px-1 text-center' : 'px-3 text-left', col.sortable && 'cursor-pointer hover:bg-muted/80', sortField === col.field && 'bg-accent', col.field === 'checkbox' && 'w-10', col.field === 'actions' && 'w-[60px] px-2')} style={{
             ...(col.field !== 'checkbox' && col.field !== 'actions' && !col.compact ? { width: `${col.width}px` } : {}),
             ...(col.compact ? { width: '6.67%', maxWidth: '6.67%' } : {}),
             ...(col.field === 'title' ? { minWidth: '200px' } : {}),
@@ -520,17 +507,6 @@ export function ActionItemsTable({
         }}
         onSave={handleDealSave}
         isCreating={false}
-      />
-
-      {/* Lead Modal */}
-      <LeadModal
-        open={leadModalOpen}
-        onOpenChange={(open) => {
-          setLeadModalOpen(open);
-          if (!open) setSelectedLead(null);
-        }}
-        lead={selectedLead}
-        onSuccess={() => setLeadModalOpen(false)}
       />
 
       {/* Contact Modal */}
