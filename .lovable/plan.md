@@ -1,90 +1,82 @@
 
-## Fix Backup Record Count Bloat & All System Section Issues
 
-### Root Cause Analysis
+## Fix Mouse Scroll in Contact and Account Dropdowns (Inside Dialog)
 
-The full backup jumped from 5,227 → 30,777 records because the `security_audit_log` table has **25,551 rows** — accounting for 83% of the backup. Here's why:
+### Root Cause
 
-**`src/components/SecurityProvider.tsx`** logs four event types on every session:
-- `SESSION_START` — fires every time `userRole` is set (11,167 entries)
-- `SESSION_END` — fires on component unmount (9,070 entries)
-- `SESSION_INACTIVE` — fires every time a browser tab is hidden (2,202 entries)
-- `SESSION_ACTIVE` — fires every time a browser tab becomes visible again (2,103 entries)
+The Contact and Account searchable dropdowns use a `Popover` + `Command` (cmdk) combo that is rendered **inside a Radix Dialog** (the DealForm modal). This is a well-documented Radix UI bug (GitHub issues #3423, #542, #6988): when a Popover is nested inside a Dialog, the Dialog's pointer-events management blocks mouse wheel scroll events from reaching the Popover's scrollable content.
 
-This means every single tab switch writes two rows to the DB. With normal browsing the table fills up rapidly.
+The previous fix (removing `overflow-hidden` from `CommandGroup`) was correct in principle but didn't address this specific Dialog-nesting issue.
 
----
+### Solution
 
-### Issues & Fixes
+Apply two targeted fixes:
 
-**Issue 1 — `security_audit_log` bloating full backup (PRIMARY)**
+1. **Add `pointer-events: auto` style to the `PopoverContent`** in both dropdown components -- this overrides the Dialog's `pointer-events: none` that blocks interaction with portal-rendered content.
 
-The `create-backup` and `scheduled-backup` edge functions include `security_audit_log` in `BACKUP_TABLES`. This is audit/operational data — not business data — and it should not be part of the standard backup. Likewise `user_sessions` and `keep_alive` are ephemeral operational tables.
+2. **Add a direct `onWheel` handler on `CommandList`** as a belt-and-suspenders fix -- this manually scrolls the list element when the mouse wheel event fires, completely bypassing any event propagation issues.
 
-**Fix:** Remove `security_audit_log`, `user_sessions`, and `keep_alive` from `BACKUP_TABLES` in both edge functions.
+### Files to Modify (2 files)
 
-**File:** `supabase/functions/create-backup/index.ts`
-**File:** `supabase/functions/scheduled-backup/index.ts`
+**1. `src/components/ContactSearchableDropdown.tsx`**
 
----
+On the `PopoverContent` element (line 133), add `style={{ pointerEvents: 'auto' }}`.
 
-**Issue 2 — `SecurityProvider` creates excessive SESSION_INACTIVE / SESSION_ACTIVE noise**
+On the `CommandList` element (line 140), add an `onWheel` handler that manually scrolls:
 
-Every browser tab switch generates two DB writes. The `SESSION_INACTIVE` and `SESSION_ACTIVE` events are already in the `EXCLUDED_ACTIONS` list in `auditLogUtils.ts` (hidden from Audit Logs UI), but they still write to the DB and bloat the `security_audit_log` table.
+```tsx
+<PopoverContent
+  className="w-[--radix-popover-trigger-width] p-0"
+  align="start"
+  side="bottom"
+  avoidCollisions={false}
+  style={{ pointerEvents: 'auto' }}
+>
+  <Command shouldFilter={false}>
+    <CommandInput ... />
+    <CommandList
+      onWheel={(e) => {
+        e.stopPropagation();
+        const target = e.currentTarget;
+        target.scrollTop += e.deltaY;
+      }}
+    >
+```
 
-**Fix:** Remove `SESSION_INACTIVE` and `SESSION_ACTIVE` logging from `SecurityProvider`. Keep `SESSION_START` and `SESSION_END` since those are meaningful security events showing logins/logouts.
+**2. `src/components/AccountSearchableDropdown.tsx`**
 
-**File:** `src/components/SecurityProvider.tsx` — Remove the `handleVisibilityChange` listener and its two `logSecurityEvent` calls.
+Same changes on the `PopoverContent` element (line 107) and `CommandList` element (line 114):
 
----
+```tsx
+<PopoverContent
+  className="w-[--radix-popover-trigger-width] p-0"
+  align="start"
+  side="bottom"
+  avoidCollisions={false}
+  style={{ pointerEvents: 'auto' }}
+>
+  <Command shouldFilter={false}>
+    <CommandInput ... />
+    <CommandList
+      onWheel={(e) => {
+        e.stopPropagation();
+        const target = e.currentTarget;
+        target.scrollTop += e.deltaY;
+      }}
+    >
+```
 
-**Issue 3 — "leads" backups still appear in Backup History**
+**3. `src/components/LeadSearchableDropdown.tsx`** (used in Deal forms too)
 
-The `getBackupLabel` function in `BackupRestoreSettings.tsx` looks up `backup.module_name` in the `MODULES` array. Since `leads` was removed from `MODULES`, it falls through to the raw `backup.module_name` value ("leads") and displays it as-is. This means old leads backups in the history now show the raw string "leads" instead of a friendly label.
+Same pattern applied to its `PopoverContent` and `CommandList` for consistency.
 
-**Fix:** Update `getBackupLabel` to handle the legacy `leads` module gracefully — display it as "Leads (Legacy)" or map it through a fallback label lookup that includes `leads`.
+### Why This Works
 
-**File:** `src/components/settings/BackupRestoreSettings.tsx`
+- `pointer-events: auto` on `PopoverContent` overrides the `pointer-events: none` that the Dialog overlay sets, allowing mouse events (including wheel) to reach the Popover content.
+- The `onWheel` handler on `CommandList` is a direct, imperative scroll that works even if the wheel event doesn't naturally propagate through the DOM due to Radix's focus/event management.
+- `e.stopPropagation()` prevents the wheel event from bubbling up to the Dialog and triggering unwanted behavior.
 
----
+### What Is NOT Changed
 
-**Issue 4 — Edge functions still have `leads` in MODULE_TABLES**
-
-Both `create-backup` and `scheduled-backup` still define `leads: ['leads', 'lead_action_items']` in `MODULE_TABLES`. This means if someone somehow triggers a leads module backup (e.g., directly via API), it still works as a standalone module. Since leads is now part of deals at the UI level, the edge functions' `MODULE_TABLES` should be updated so the deals module backup also includes the leads-related tables for completeness.
-
-**Fix:**
-- Remove `leads` key from `MODULE_TABLES` in both edge functions
-- Add `leads` and `lead_action_items` to the `deals` module backup tables so historical leads data is captured when backing up Deals
-
-**File:** `supabase/functions/create-backup/index.ts`
-**File:** `supabase/functions/scheduled-backup/index.ts`
-
----
-
-**Issue 5 — Full backup still includes `leads` table (correct to keep)**
-
-The `leads` table still exists in the database and contains real data (14 records). The full backup SHOULD include the `leads` table for data safety. This is correct behavior — keep it in `BACKUP_TABLES`. Only the UI module card and module-scoped backup for "leads" as a standalone module should be removed.
-
----
-
-### Summary of Files to Change
-
-| File | Change |
-|---|---|
-| `supabase/functions/create-backup/index.ts` | Remove `security_audit_log`, `user_sessions`, `keep_alive` from `BACKUP_TABLES`; remove `leads` from `MODULE_TABLES`; add `leads`/`lead_action_items` to deals module tables |
-| `supabase/functions/scheduled-backup/index.ts` | Same changes as create-backup |
-| `src/components/SecurityProvider.tsx` | Remove `SESSION_INACTIVE` and `SESSION_ACTIVE` event listeners; keep `SESSION_START` and `SESSION_END` |
-| `src/components/settings/BackupRestoreSettings.tsx` | Fix `getBackupLabel` to handle legacy `leads` module name gracefully |
-
-### Files NOT changed (by design)
-
-- `supabase/functions/restore-backup/index.ts` — The restore function correctly excludes `security_audit_log` from DELETE_ORDER and INSERT_ORDER (it already handles this properly for tables present in the backup file only)
-- `src/components/settings/audit/auditLogUtils.ts` — `SESSION_INACTIVE`/`SESSION_ACTIVE` already correctly excluded from UI display
-- `src/components/settings/AuditLogsSettings.tsx` — Audit log viewer is correct; the problem is data volume not display logic
-
-### Expected Impact After Fix
-
-- Future full backups will exclude ~25,000+ audit log rows, bringing record counts back to ~5,200 range
-- `security_audit_log` will no longer grow at ~100+ rows/day from session noise
-- Backup History will display legacy leads backups with a readable label instead of raw "leads"
-- Deals module backup will now include historical leads data
+- The `command.tsx` shared component stays as-is (the `overflow-hidden` removal from the previous fix is already applied and still helpful).
+- No changes to the Dialog or Popover UI primitives -- the fix is scoped to the three dropdown components only.
