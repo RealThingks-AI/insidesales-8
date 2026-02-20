@@ -1,82 +1,165 @@
 
 
-## Fix Mouse Scroll in Contact and Account Dropdowns (Inside Dialog)
+## Comprehensive Backup, Restore & Audit Log Fix
 
-### Root Cause
+### Problem Summary
 
-The Contact and Account searchable dropdowns use a `Popover` + `Command` (cmdk) combo that is rendered **inside a Radix Dialog** (the DealForm modal). This is a well-documented Radix UI bug (GitHub issues #3423, #542, #6988): when a Popover is nested inside a Dialog, the Dialog's pointer-events management blocks mouse wheel scroll events from reaching the Popover's scrollable content.
+The `security_audit_log` table has **26,152 rows**, with **25,135 being session noise**:
+- SESSION_START: 11,433 (fires on every re-render due to missing dedup guard)
+- SESSION_END: 9,249 (fires in useEffect cleanup on every re-render)
+- SESSION_INACTIVE: 2,275 (fires on every tab switch)
+- SESSION_ACTIVE: 2,178 (fires on every tab switch)
+- Actual useful CRUD logs: ~1,000
 
-The previous fix (removing `overflow-hidden` from `CommandGroup`) was correct in principle but didn't address this specific Dialog-nesting issue.
+The backup system includes operational tables (`user_sessions`, `keep_alive`) inflating record counts, the `leads` module is listed separately despite being merged into Deals, restore logic has ID-type bugs, and the scheduled backup edge function does not exist.
 
-### Solution
+---
 
-Apply two targeted fixes:
+### Changes by File
 
-1. **Add `pointer-events: auto` style to the `PopoverContent`** in both dropdown components -- this overrides the Dialog's `pointer-events: none` that blocks interaction with portal-rendered content.
+#### 1. `src/components/SecurityProvider.tsx` -- Stop audit log noise
 
-2. **Add a direct `onWheel` handler on `CommandList`** as a belt-and-suspenders fix -- this manually scrolls the list element when the mouse wheel event fires, completely bypassing any event propagation issues.
+**Problem:** SESSION_START fires on every re-render (no dedup), SESSION_END fires in cleanup on every re-render, and SESSION_ACTIVE/SESSION_INACTIVE fire on every tab switch. This created 25,000+ useless rows.
 
-### Files to Modify (2 files)
+**Fix:**
+- Add a `useRef` guard so SESSION_START only fires once per user session
+- Remove the visibility change listener entirely (SESSION_ACTIVE/SESSION_INACTIVE are not actionable)
+- Remove SESSION_END from the cleanup (it fires on re-renders, not actual logouts)
+- Use the reference file pattern with `usePermissions()` for role instead of a separate fetch
 
-**1. `src/components/ContactSearchableDropdown.tsx`**
+#### 2. `src/hooks/useSecurityAudit.tsx` -- Fix redundant auth calls
 
-On the `PopoverContent` element (line 133), add `style={{ pointerEvents: 'auto' }}`.
+**Problem:** Every call to `logSecurityEvent` makes a network call to `supabase.auth.getUser()` before logging. This is wasteful since the caller already has the user context.
 
-On the `CommandList` element (line 140), add an `onWheel` handler that manually scrolls:
+**Fix:** Use the cached `user` from `useAuth()` hook (as the reference file does) instead of calling `supabase.auth.getUser()` on every log. Use fire-and-forget pattern (no await on the RPC call) to avoid blocking the UI.
 
-```tsx
-<PopoverContent
-  className="w-[--radix-popover-trigger-width] p-0"
-  align="start"
-  side="bottom"
-  avoidCollisions={false}
-  style={{ pointerEvents: 'auto' }}
->
-  <Command shouldFilter={false}>
-    <CommandInput ... />
-    <CommandList
-      onWheel={(e) => {
-        e.stopPropagation();
-        const target = e.currentTarget;
-        target.scrollTop += e.deltaY;
-      }}
-    >
+#### 3. `supabase/functions/create-backup/index.ts` -- Fix backup scope
+
+**Problem:**
+- `BACKUP_TABLES` includes `user_sessions` and `keep_alive` (operational/ephemeral)
+- `MODULE_TABLES.deals` does not include `leads` and `lead_action_items` (Leads merged into Deals)
+- No `notifications` standalone module entry
+
+**Fix:**
+- Remove `user_sessions` and `keep_alive` from `BACKUP_TABLES`
+- Update `MODULE_TABLES`:
+
+```text
+contacts: ['contacts']
+accounts: ['accounts']
+deals: ['deals', 'deal_action_items', 'leads', 'lead_action_items']
+action_items: ['action_items']
+notifications: ['notifications', 'notification_preferences']
 ```
 
-**2. `src/components/AccountSearchableDropdown.tsx`**
+#### 4. `supabase/functions/restore-backup/index.ts` -- Fix restore logic
 
-Same changes on the `PopoverContent` element (line 107) and `CommandList` element (line 114):
+**Problem:**
+- Delete query uses `.neq('id', '00000000-0000-0000-0000-000000000000')` which crashes for tables with non-UUID IDs (e.g., `keep_alive` uses bigint)
+- `profiles` and `user_roles` are missing from `DELETE_ORDER` and `INSERT_ORDER` but are in `BACKUP_TABLES`
+- `user_sessions` and `keep_alive` still in the order lists
 
-```tsx
-<PopoverContent
-  className="w-[--radix-popover-trigger-width] p-0"
-  align="start"
-  side="bottom"
-  avoidCollisions={false}
-  style={{ pointerEvents: 'auto' }}
->
-  <Command shouldFilter={false}>
-    <CommandInput ... />
-    <CommandList
-      onWheel={(e) => {
-        e.stopPropagation();
-        const target = e.currentTarget;
-        target.scrollTop += e.deltaY;
-      }}
-    >
+**Fix:**
+- Change delete approach to `.delete().not('id', 'is', null)` (works for any column type)
+- Add `profiles` and `user_roles` to correct positions
+- Remove `user_sessions` and `keep_alive` from order lists
+
+Updated orders:
+
+```text
+DELETE_ORDER:
+  deal_action_items, lead_action_items, action_items,
+  notifications, notification_preferences, saved_filters,
+  column_preferences, dashboard_preferences,
+  deals, contacts, leads, accounts,
+  user_preferences, yearly_revenue_targets, page_permissions,
+  user_roles, profiles
+
+INSERT_ORDER:
+  profiles, user_roles,
+  accounts, leads, contacts, deals,
+  lead_action_items, deal_action_items, action_items,
+  notifications, notification_preferences, saved_filters,
+  column_preferences, dashboard_preferences,
+  user_preferences, yearly_revenue_targets, page_permissions
 ```
 
-**3. `src/components/LeadSearchableDropdown.tsx`** (used in Deal forms too)
+#### 5. `supabase/functions/scheduled-backup/index.ts` -- Create new edge function
 
-Same pattern applied to its `PopoverContent` and `CommandList` for consistency.
+**Problem:** No edge function exists to execute scheduled backups. The UI saves schedule config to `backup_schedules` but nothing triggers actual backups.
 
-### Why This Works
+**Fix:** Create new function that:
+- Reads `backup_schedules` for enabled schedules where `next_run_at <= now()`
+- Uses the same `BACKUP_TABLES` and `MODULE_TABLES` as `create-backup`
+- Respects `backup_scope` (full/module) and `backup_module` columns
+- Updates `last_run_at` and computes `next_run_at` after execution
+- Enforces the 30-backup limit
 
-- `pointer-events: auto` on `PopoverContent` overrides the `pointer-events: none` that the Dialog overlay sets, allowing mouse events (including wheel) to reach the Popover content.
-- The `onWheel` handler on `CommandList` is a direct, imperative scroll that works even if the wheel event doesn't naturally propagate through the DOM due to Radix's focus/event management.
-- `e.stopPropagation()` prevents the wheel event from bubbling up to the Dialog and triggering unwanted behavior.
+#### 6. `supabase/config.toml` -- Register new function
 
-### What Is NOT Changed
+Add:
+```toml
+[functions.scheduled-backup]
+verify_jwt = false
+```
 
-- The `command.tsx` shared component stays as-is (the `overflow-hidden` removal from the previous fix is already applied and still helpful).
-- No changes to the Dialog or Popover UI primitives -- the fix is scoped to the three dropdown components only.
+#### 7. `src/components/settings/BackupRestoreSettings.tsx` -- UI fixes
+
+**7a. Legacy label fix:**
+Add a fallback map for old backups with `module_name: 'leads'`:
+
+```typescript
+const LEGACY_MODULE_LABELS: Record<string, string> = {
+  leads: 'Leads (Legacy)',
+};
+```
+
+Update `getBackupLabel` to use it.
+
+**7b. Remove delete button:**
+- Remove the delete button from each backup row (lines 516-527)
+- Remove `handleDeleteClick`, `handleDeleteConfirm` functions
+- Remove delete confirmation dialog (lines 585-605)
+- Remove `deleting`, `showDeleteDialog` state
+- Remove `Trash2` from imports
+- The edge function's 30-backup limit handles cleanup automatically
+
+**7c. Increase scroll height:**
+Change `max-h-[400px]` to `max-h-[600px]` on line 466.
+
+**7d. Add backup scope selector to Scheduled Backups:**
+Add a scope dropdown (Full System / Contacts / Accounts / Deals / Action Items / Notifications) that saves to `backup_scope` and `backup_module` in `backup_schedules`. When "Full System" is selected: `backup_scope = 'full'`, `backup_module = null`. When a module is selected: `backup_scope = 'module'`, `backup_module = module_id`.
+
+**7e. Add frequency selector:**
+The schedule UI currently only shows time but not frequency. Add a frequency dropdown (Daily / Every 2 Days / Weekly).
+
+#### 8. Cron Job Setup (SQL)
+
+After the scheduled-backup edge function is deployed, set up `pg_cron` to invoke it every hour:
+
+```sql
+SELECT cron.schedule(
+  'scheduled-backup-check',
+  '0 * * * *',
+  $$
+  SELECT net.http_post(
+    url:='https://nreslricievaamrwfrlx.supabase.co/functions/v1/scheduled-backup',
+    headers:='{"Content-Type": "application/json", "Authorization": "Bearer <anon_key>"}'::jsonb,
+    body:='{}'::jsonb
+  ) as request_id;
+  $$
+);
+```
+
+---
+
+### Expected Impact
+
+| Metric | Before | After |
+|---|---|---|
+| Audit log growth/day | ~100+ session noise rows | Only meaningful CRUD events |
+| Full backup records | ~31,000+ | ~5,200 (no audit log, no operational tables) |
+| Deals module backup | Excludes leads data | Includes leads + lead_action_items |
+| Scheduled backups | Non-functional (no edge function) | Fully working with scope selection |
+| Restore on mixed ID types | Crashes on bigint tables | Works universally |
+
