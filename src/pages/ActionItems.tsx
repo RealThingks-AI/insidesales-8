@@ -63,27 +63,60 @@ export default function ActionItems() {
   const [editingItem, setEditingItem] = useState<ActionItem | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  // Handle highlight from notification click
+  // Helper to check if string is a UUID
+  const isUuid = useCallback((str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str), []);
+
+  // Handle highlight from notification/email click
   useEffect(() => {
-    if (highlightId && !isLoading && !highlightProcessed) {
-      const item = actionItems.find(a => a.id === highlightId || a.title === highlightId);
-      if (item) {
-        setEditingItem(item);
+    if (!highlightId || highlightProcessed) return;
+    if (isLoading) return; // wait for initial load
+
+    const findAndOpenItem = async () => {
+      // 1. Try local list first (by id or title for backward compat)
+      let found = actionItems.find(a => a.id === highlightId || a.title === highlightId);
+
+      // 2. If not in local list, query DB directly
+      if (!found) {
+        try {
+          if (isUuid(highlightId)) {
+            const { data } = await supabase
+              .from('action_items')
+              .select('*')
+              .eq('id', highlightId)
+              .maybeSingle();
+            if (data) found = data as unknown as ActionItem;
+          }
+          // Fallback: title-based lookup (old email links)
+          if (!found) {
+            const { data } = await supabase
+              .from('action_items')
+              .select('*')
+              .ilike('title', highlightId)
+              .limit(1)
+              .maybeSingle();
+            if (data) found = data as unknown as ActionItem;
+          }
+        } catch (err) {
+          console.error('Error fetching highlighted action item:', err);
+        }
+      }
+
+      if (found) {
+        setEditingItem(found);
         setModalOpen(true);
-      } else if (actionItems.length > 0) {
-        // Item not found - show toast
+      } else {
         toast({
           title: "Item not found",
           description: "The action item you're looking for may have been deleted."
         });
       }
-      // Clear the highlight param and mark as processed
-      setSearchParams({}, {
-        replace: true
-      });
+
+      setSearchParams({}, { replace: true });
       setHighlightProcessed(true);
-    }
-  }, [highlightId, actionItems, isLoading, setSearchParams, highlightProcessed, toast]);
+    };
+
+    findAndOpenItem();
+  }, [highlightId, actionItems, isLoading, highlightProcessed, isUuid, setSearchParams, toast]);
 
   // Reset processed state when highlightId changes
   useEffect(() => {

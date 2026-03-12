@@ -135,7 +135,7 @@ function buildCategoryTable(
         ? '<span style="color:#D97706;">Medium</span>'
         : '<span style="color:#6B7280;">Low</span>';
 
-    const itemUrl = `${appUrl}/action-items?highlight=${encodeURIComponent(item.title)}`;
+    const itemUrl = `${appUrl}/action-items?highlight=${item.id}`;
     return `<tr style="background-color:${rowBg};">
       <td style="padding:10px 12px;border-bottom:1px solid #E5E7EB;"><a href="${itemUrl}" style="color:#1E40AF;text-decoration:underline;font-weight:500;" target="_blank">${item.title}</a></td>
       <td style="padding:10px 12px;border-bottom:1px solid #E5E7EB;">${dueDateDisplay}</td>
