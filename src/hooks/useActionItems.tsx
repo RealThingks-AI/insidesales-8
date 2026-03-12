@@ -227,9 +227,10 @@ export function useActionItems(initialFilters?: Partial<ActionItemFilters>) {
 
       return { previousSnapshots };
     },
-    onError: (error, _updatedItem, context) => {
+    onError: (error: any, _updatedItem, context) => {
       console.error('Error updating action item:', error);
-      toast.error('Failed to update action item');
+      const message = error?.message || error?.details || 'Failed to update action item';
+      toast.error(message);
       // Rollback all caches
       if (context?.previousSnapshots) {
         for (const { queryKey, data } of context.previousSnapshots) {
